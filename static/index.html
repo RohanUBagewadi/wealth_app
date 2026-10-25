@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6fa">
+  <meta name="description" content="A private, manual-first personal finance workspace.">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/app.css">
+  <link rel="stylesheet" href="/components.css">
+  <title>Wealth — your money, in focus</title>
+</head>
+<body>
+  <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".8"/><circle cx="4" cy="12" r=".8"/><circle cx="4" cy="18" r=".8"/></symbol>
+    <symbol id="i-wallet" viewBox="0 0 24 24"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H20v15H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3"/><path d="M3.5 8H20m-5 5h5"/><circle cx="15.2" cy="13" r=".7"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18m-14 5h4"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5m0 14h17"/><path d="m7 15 4-4 3 2 5-6"/><path d="M16 7h3v3"/></symbol>
+    <symbol id="i-pie" viewBox="0 0 24 24"><path d="M11 3a9 9 0 1 0 10 10H11z"/><path d="M14 3.5A8.5 8.5 0 0 1 20.5 10H14z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 13 13 20l-9-9V4h7z"/><circle cx="8" cy="8" r="1"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4m-4 4 4-4 4 4"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m19.4 15 .1.1a1.8 1.8 0 1 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 1 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 1 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3H3.8a1.8 1.8 0 1 1 0-3.6H4a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 1 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 1 1 3.6 0V2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 1 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 1 1 0 3.6H20a1.8 1.8 0 0 0-.6 3z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14m6-6-6 6-6-6"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4m14-1v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="m12 3 1.7 5.3L19 10l-5.3 1.7L12 17l-1.7-5.3L5 10l5.3-1.7L12 3ZM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8L19 16Z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
+    <symbol id="i-utensils" viewBox="0 0 24 24"><path d="M7 3v7m-3-7v4a3 3 0 0 0 6 0V3m-3 7v11M17 3v18m0-18c3 2 3 7 0 9"/></symbol>
+    <symbol id="i-train" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="15" rx="4"/><path d="M8 21h8M8 18l-2 3m10-3 2 3M8 7h8M8 12h.1M16 12h.1"/></symbol>
+    <symbol id="i-bag" viewBox="0 0 24 24"><path d="M5 8h14l1 13H4L5 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.8 8.6c0 5.1-8.8 11-8.8 11s-8.8-5.9-8.8-11A4.6 4.6 0 0 1 12 6a4.6 4.6 0 0 1 8.8 2.6Z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></symbol>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="14" rx="2"/><path d="M8 7V4h8v3M3 12h18m-11 0v2h4v-2"/></symbol>
+    <symbol id="i-plane" viewBox="0 0 24 24"><path d="m21 3-7.5 18-3.8-7.7L2 9.5 21 3Z"/><path d="m9.7 13.3 5-5"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 14h8m-8 4h8"/></symbol>
+  </svg>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
+      <a class="brand" href="#dashboard" aria-label="Wealth home">
+        <span class="brand-mark"><svg class="icon"><use href="#i-sparkle"/></svg></span>
+        <span class="brand-copy"><strong>wealth</strong><small>PERSONAL FINANCE</small></span>
+      </a>
+      <div class="workspace-switch"><span class="workspace-avatar">W</span><span><strong>My workspace</strong><small>Private · on this device</small></span><svg class="icon tiny"><use href="#i-chevron"/></svg></div>
+      <nav class="nav-group">
+        <p class="nav-label">OVERVIEW</p>
+        <a class="nav-link active" href="#dashboard" data-page="dashboard"><svg class="icon"><use href="#i-grid"/></svg><span>Dashboard</span></a>
+        <a class="nav-link" href="#transactions" data-page="transactions"><svg class="icon"><use href="#i-list"/></svg><span>Transactions</span><span class="nav-badge" id="transactionCount">0</span></a>
+        <a class="nav-link" href="#wallets" data-page="wallets"><svg class="icon"><use href="#i-wallet"/></svg><span>Wallets</span></a>
+        <a class="nav-link" href="#budgets" data-page="budgets"><svg class="icon"><use href="#i-chart"/></svg><span>Budgets</span></a>
+        <a class="nav-link" href="#reports" data-page="reports"><svg class="icon"><use href="#i-pie"/></svg><span>Reports</span></a>
+        <p class="nav-label nav-label-spaced">MANAGE</p>
+        <a class="nav-link" href="#categories" data-page="categories"><svg class="icon"><use href="#i-tag"/></svg><span>Categories</span></a>
+        <a class="nav-link" href="#import" data-page="import"><svg class="icon"><use href="#i-upload"/></svg><span>Import & export</span></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="sync-card"><span class="sync-dot"></span><div><strong>Saved on this device</strong><small>Remote sync not configured</small></div><svg class="icon tiny"><use href="#i-more"/></svg></div>
+        <a class="nav-link" href="#settings" data-page="settings"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></a>
+        <div class="profile-row"><span class="profile-avatar">Y</span><span><strong>Your private ledger</strong><small>Local workspace</small></span><button class="icon-button small" data-action="privacy-info" aria-label="Privacy information"><svg class="icon"><use href="#i-more"/></svg></button></div>
+      </div>
+    </aside>
+
+    <main class="main-area">
+      <header class="topbar">
+        <div class="mobile-brand"><span class="brand-mark"><svg class="icon"><use href="#i-sparkle"/></svg></span><strong>wealth</strong></div>
+        <div class="breadcrumbs"><span>Workspace</span><svg class="icon tiny"><use href="#i-chevron"/></svg><strong id="crumbCurrent">Dashboard</strong></div>
+        <div class="top-actions">
+          <label class="search-box"><svg class="icon"><use href="#i-search"/></svg><input id="globalSearch" type="search" placeholder="Search transactions" aria-label="Search transactions"><kbd>⌘ K</kbd></label>
+          <span class="connection-pill"><i></i><span>Local mode</span></span>
+          <button class="button button-primary button-top" data-action="add-transaction"><svg class="icon"><use href="#i-plus"/></svg><span>Add transaction</span></button>
+        </div>
+      </header>
+
+      <div class="content-wrap">
+        <section class="page-view" id="view-dashboard" data-view="dashboard">
+          <div class="page-heading"><div><p class="eyebrow" id="todayLabel">YOUR FINANCES AT A GLANCE</p><h1>Good day <span class="wave">✦</span></h1><p class="page-subtitle">A calmer view of where your money is going.</p></div><div class="heading-actions"><label class="select-shell"><svg class="icon"><use href="#i-chart"/></svg><select id="dashboardRange" aria-label="Dashboard date range"><option value="month">This month</option><option value="last-month">Last month</option><option value="year">This year</option></select></label><button class="icon-button" aria-label="More dashboard options" data-action="dashboard-more"><svg class="icon"><use href="#i-more"/></svg></button></div></div>
+          <div class="hero-grid" id="summaryCards"></div>
+          <div class="dashboard-grid">
+            <article class="surface chart-card"><div class="section-heading"><div><p class="eyebrow">CASH FLOW</p><h2>Income & expenses</h2></div><span class="chart-legend"><i class="legend-income"></i>Income<i class="legend-expense"></i>Expenses</span></div><div id="cashflowChart" class="chart-container" role="img" aria-label="Income and expense chart"></div></article>
+            <article class="surface budget-card"><div class="section-heading"><div><p class="eyebrow">STAY ON TRACK</p><h2>Budgets</h2></div><button class="text-button" data-go="budgets">See all <svg class="icon tiny"><use href="#i-chevron"/></svg></button></div><div id="dashboardBudgets" class="budget-list"></div></article>
+            <article class="surface wallets-card"><div class="section-heading"><div><p class="eyebrow">YOUR MONEY, ORGANIZED</p><h2>Wallets</h2></div><button class="text-button" data-go="wallets">Manage <svg class="icon tiny"><use href="#i-chevron"/></svg></button></div><div id="dashboardWallets" class="wallet-mini-list"></div></article>
+            <article class="surface recent-card"><div class="section-heading"><div><p class="eyebrow">THE LATEST</p><h2>Recent transactions</h2></div><button class="text-button" data-go="transactions">View all <svg class="icon tiny"><use href="#i-chevron"/></svg></button></div><div id="recentTransactions" class="recent-list"></div></article>
+          </div>
+          <div class="privacy-note"><svg class="icon"><use href="#i-sparkle"/></svg><span>Your finances stay on this device. No bank connections, tracking, or surprise sharing.</span><button class="text-button" data-go="settings">Learn about privacy</button></div>
+        </section>
+
+        <section class="page-view hidden" id="view-transactions" data-view="transactions">
+          <div class="page-heading"><div><p class="eyebrow">YOUR LEDGER</p><h1>Transactions</h1><p class="page-subtitle">Every entry, thoughtfully organized.</p></div><button class="button button-primary" data-action="add-transaction"><svg class="icon"><use href="#i-plus"/></svg>Add transaction</button></div>
+          <div class="surface table-surface"><div class="toolbar"><label class="filter-search"><svg class="icon"><use href="#i-search"/></svg><input id="transactionSearch" type="search" placeholder="Search notes or payees" aria-label="Search transaction details"></label><select id="filterWallet" aria-label="Filter by wallet"><option value="">All wallets</option></select><select id="filterType" aria-label="Filter by transaction type"><option value="">All types</option><option value="expense">Expenses</option><option value="income">Income</option><option value="transfer">Transfers</option></select><select id="filterCategory" aria-label="Filter by category"><option value="">All categories</option></select><button class="button button-quiet" data-action="clear-filters">Reset</button></div><div class="table-wrap"><table><thead><tr><th scope="col">TRANSACTION</th><th scope="col">WALLET</th><th scope="col">CATEGORY</th><th scope="col">DATE</th><th scope="col" class="align-right">AMOUNT</th><th scope="col"><span class="sr-only">Actions</span></th></tr></thead><tbody id="transactionRows"></tbody></table></div><div class="table-footer"><span id="transactionSummary"></span><div class="pagination"><button class="icon-button small" id="pagePrev" aria-label="Previous page">‹</button><span id="pageLabel">1</span><button class="icon-button small" id="pageNext" aria-label="Next page">›</button></div></div></div>
+        </section>
+
+        <section class="page-view hidden" id="view-wallets" data-view="wallets">
+          <div class="page-heading"><div><p class="eyebrow">POCKETS & ACCOUNTS</p><h1>Your wallets</h1><p class="page-subtitle">Keep the places your money lives in one clear view.</p></div><button class="button button-primary" data-action="add-wallet"><svg class="icon"><use href="#i-plus"/></svg>New wallet</button></div>
+          <div class="wallet-overview surface"><div><span class="eyebrow">TOTAL BY CURRENCY</span><div id="walletCurrencyTotals" class="currency-total-list"></div></div><div class="wallet-overview-art"><span class="orb orb-a"></span><span class="orb orb-b"></span><svg class="icon"><use href="#i-wallet"/></svg><span>Everyday money<br>at a glance</span></div></div>
+          <div id="walletGrid" class="wallet-grid"></div>
+          <div id="archivedWallets" class="archived-section"></div>
+        </section>
+
+        <section class="page-view hidden" id="view-budgets" data-view="budgets">
+          <div class="page-heading"><div><p class="eyebrow">SPEND WITH INTENTION</p><h1>Budgets</h1><p class="page-subtitle">A little structure can make room for what matters.</p></div><button class="button button-primary" data-action="add-budget"><svg class="icon"><use href="#i-plus"/></svg>Create budget</button></div>
+          <div id="budgetSummary" class="budget-summary-grid"></div><div id="budgetGrid" class="budget-grid"></div>
+        </section>
+
+        <section class="page-view hidden" id="view-reports" data-view="reports">
+          <div class="page-heading"><div><p class="eyebrow">PATTERNS, MADE CLEAR</p><h1>Reports</h1><p class="page-subtitle">Explore your spending without losing the bigger picture.</p></div><div class="report-date-range"><input type="date" id="reportFrom" aria-label="Report start date"><span>to</span><input type="date" id="reportTo" aria-label="Report end date"><button class="button button-secondary" id="refreshReport">Update</button></div></div>
+          <div id="reportSummary" class="hero-grid report-summary"></div><div class="reports-grid"><article class="surface report-panel"><div class="section-heading"><div><p class="eyebrow">WHERE IT GOES</p><h2>Spending by category</h2></div></div><div id="categoryReport" class="bar-list"></div></article><article class="surface report-panel"><div class="section-heading"><div><p class="eyebrow">MONEY IN & OUT</p><h2>Monthly cash flow</h2></div></div><div id="monthlyReport" class="monthly-report"></div></article><article class="surface report-panel wide"><div class="section-heading"><div><p class="eyebrow">BY WALLET</p><h2>Spending by wallet</h2></div></div><div id="walletReport" class="bar-list"></div></article></div>
+        </section>
+
+        <section class="page-view hidden" id="view-categories" data-view="categories">
+          <div class="page-heading"><div><p class="eyebrow">A PLACE FOR EVERYTHING</p><h1>Categories</h1><p class="page-subtitle">Shape your spending map around your life.</p></div><button class="button button-primary" data-action="add-category"><svg class="icon"><use href="#i-plus"/></svg>New category</button></div>
+          <div id="categoryGroups" class="category-groups"></div>
+        </section>
+
+        <section class="page-view hidden" id="view-import" data-view="import">
+          <div class="page-heading"><div><p class="eyebrow">BRING YOUR HISTORY WITH YOU</p><h1>Import & export</h1><p class="page-subtitle">Files stay on this device. You review every imported row before it is saved.</p></div></div>
+          <div class="import-grid"><article class="surface import-card"><span class="import-icon lavender"><svg class="icon"><use href="#i-file"/></svg></span><p class="eyebrow">REVIEWED IMPORT</p><h2>CSV transactions</h2><p>Preview, edit, and approve each row before it joins your ledger.</p><label class="button button-secondary file-button">Choose CSV<input id="csvFile" type="file" accept=".csv,text/csv"></label><a class="text-button download-template" href="/api/imports/template.csv">Download sample format</a></article><article class="surface import-card"><span class="import-icon peach"><svg class="icon"><use href="#i-file"/></svg></span><p class="eyebrow">LOCAL TEXT EXTRACTION</p><h2>PDF statement</h2><p>Text extraction runs locally. No OCR or external upload. Review all candidates before saving.</p><div class="pdf-controls"><select id="pdfWallet" aria-label="Wallet for PDF import"><option value="">Choose destination wallet</option></select><input id="pdfCurrency" maxlength="3" placeholder="Currency" aria-label="PDF currency code"></div><label class="button button-secondary file-button">Choose PDF<input id="pdfFile" type="file" accept="application/pdf,.pdf"></label></article><article class="surface import-card"><span class="import-icon mint"><svg class="icon"><use href="#i-upload"/></svg></span><p class="eyebrow">PORTABLE & PRIVATE</p><h2>Export transactions</h2><p>Create a CSV for a selected period. Sensitive details remain in the file you choose to save.</p><div class="export-range"><input id="exportFrom" type="date" aria-label="Export from date"><input id="exportTo" type="date" aria-label="Export to date"></div><button class="button button-secondary" data-action="export-csv">Download CSV</button></article><article class="surface import-card"><span class="import-icon blue"><svg class="icon"><use href="#i-sparkle"/></svg></span><p class="eyebrow">ENCRYPTED MANUAL BACKUP</p><h2>Backup & restore</h2><p>Encrypt a portable backup with a passphrase, or preview a restore before applying it.</p><button class="button button-secondary" data-action="backup-create">Create encrypted backup</button><label class="text-button backup-file-label">Choose backup to restore<input id="backupFile" type="file" accept=".wbackup,application/json"></label></article></div>
+          <div id="importReview" class="import-review-slot"></div>
+        </section>
+
+        <section class="page-view hidden" id="view-settings" data-view="settings">
+          <div class="page-heading"><div><p class="eyebrow">YOUR SPACE, YOUR RULES</p><h1>Settings</h1><p class="page-subtitle">A few thoughtful controls for your private workspace.</p></div></div>
+          <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><a href="#preferences" class="selected">Preferences</a><a href="#privacy">Privacy & data</a><a href="#sync">Sync & backup</a></nav><div class="settings-panels"><article class="surface settings-panel" id="preferences"><div class="section-heading"><div><p class="eyebrow">DISPLAY</p><h2>Preferences</h2></div></div><label class="setting-row"><span><strong>Display currency</strong><small>Used for new wallets and budgets. Wallets keep their own currency.</small></span><select id="displayCurrency"></select></label><label class="setting-row"><span><strong>Appearance</strong><small>Choose a comfortable color theme.</small></span><select id="themeSelect"><option value="light">Light</option><option value="dark">Midnight</option><option value="system">Use device setting</option></select></label><label class="setting-row"><span><strong>Week starts on</strong><small>Used in date-based views.</small></span><select id="weekStart"><option value="monday">Monday</option><option value="sunday">Sunday</option></select></label><button class="button button-primary" data-action="save-preferences">Save preferences</button></article><article class="surface settings-panel" id="privacy"><div class="section-heading"><div><p class="eyebrow">ON THIS DEVICE</p><h2>Privacy & data</h2></div></div><div class="info-banner"><svg class="icon"><use href="#i-sparkle"/></svg><div><strong>Private by default</strong><p>Your ledger is stored locally in this app's data folder. The server binds to this computer only. No analytics or bank connections.</p></div></div><div class="setting-row"><span><strong>Automatic bank extraction</strong><small>Not supported. Transactions are entered manually or brought in through reviewed files.</small></span><span class="state-chip muted">Off</span></div><div class="setting-row"><span><strong>Analytics & tracking</strong><small>This app does not send usage analytics.</small></span><span class="state-chip success">None</span></div></article><article class="surface settings-panel" id="sync"><div class="section-heading"><div><p class="eyebrow">REMOTE SERVICES</p><h2>Sync & backup</h2></div></div><div class="setting-row"><span><strong>Cross-device sync</strong><small>No remote service is configured. This workspace remains on this device.</small></span><span class="state-chip muted">Not connected</span></div><div class="setting-row"><span><strong>pCloud</strong><small>Use encrypted backup files with pCloud's own app for now. OAuth integration needs app registration and a secure token service.</small></span><button class="text-button" data-go="import">Open backups</button></div><div class="setting-row"><span><strong>Encrypted backup</strong><small>Passphrase-protected AES-GCM archive using scrypt key derivation.</small></span><button class="button button-secondary" data-action="backup-create">Create backup</button></div></article></div></div>
+        </section>
+      </div>
+      <footer class="app-footer"><span>wealth · a quieter way to see your money</span><span><i class="footer-lock"></i> Private on this device</span></footer>
+    </main>
+  </div>
+
+  <nav class="mobile-nav" aria-label="Mobile navigation"><a href="#dashboard" data-page="dashboard" class="active"><svg class="icon"><use href="#i-grid"/></svg><span>Home</span></a><a href="#transactions" data-page="transactions"><svg class="icon"><use href="#i-list"/></svg><span>Activity</span></a><button class="mobile-add" data-action="add-transaction" aria-label="Add transaction"><svg class="icon"><use href="#i-plus"/></svg></button><a href="#wallets" data-page="wallets"><svg class="icon"><use href="#i-wallet"/></svg><span>Wallets</span></a><a href="#settings" data-page="settings"><svg class="icon"><use href="#i-settings"/></svg><span>More</span></a></nav>
+  <div id="modalRoot"></div><div id="toastRegion" class="toast-region" role="status" aria-live="polite"></div>
+  <noscript>This app needs JavaScript enabled for its local interface.</noscript>
+  <script src="/app.js" defer></script>
+</body>
+</html>
