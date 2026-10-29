@@ -4,12 +4,15 @@
   const $ = (s, root=document) => root.querySelector(s);
   const $$ = (s, root=document) => [...root.querySelectorAll(s)];
   const state = { page:'dashboard', data:null, transactionOffset:0, transactionLimit:25, review:null, report:null, restore:null };
+  const MAX_CSV_FILE_BYTES=2*1024*1024;
+  const MAX_PDF_FILE_BYTES=8*1024*1024;
+  const MAX_BACKUP_FILE_BYTES=8*1024*1024;
   const palettes = [
     ['#8877e8','#f0edff'],['#49ae91','#e7f7f0'],['#e69363','#fff0e6'],['#6693db','#eaf1ff'],
     ['#d97088','#fff0f3'],['#7a9c62','#eff6e9'],['#c582c8','#faeffa'],['#50aeb7','#e7f7f8']
   ];
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const icon = name => {const aliases={sparkles:'sparkle','plus-circle':'plus'};return `<svg class="icon" aria-hidden="true"><use href="#i-${esc(aliases[name]||name)}"/></svg>`;};
+  const icon = name => {const aliases={sparkles:'sparkle','plus-circle':'plus'};return `<svg class="icon" aria-hidden="true" focusable="false"><use href="#i-${esc(aliases[name]||name)}"/></svg>`;};
   const currencyExponent = code => (state.data?.currencies || []).find(x=>x.code===code)?.exponent ?? 2;
   function money(minor, currency) {
     const exp=currencyExponent(currency), n=BigInt(minor||0), neg=n<0n, abs=neg?-n:n, base=10n**BigInt(exp);
@@ -56,16 +59,24 @@
     const wallets=(state.data?.wallets||[]).filter(w=>includeArchived||!w.archived_at);
     return `<option value="">Choose wallet</option>`+wallets.map(w=>`<option value="${esc(w.id)}"${selected(w.id,value)}>${esc(w.name)} · ${esc(w.currency)}</option>`).join('');
   }
-  function categoryOptions(value='', kind='expense') {
-    const cats=(state.data?.categories||[]).filter(c=>!c.archived_at&&(c.kind===kind||c.kind==='both'));
-    return `<option value="">Uncategorized</option>`+cats.map(c=>`<option value="${esc(c.id)}"${selected(c.id,value)}>${esc(c.name)}</option>`).join('');
+  function categoryOptions(value='', kind='expense', unresolvedName='') {
+    const cats=(state.data?.categories||[]).filter(c=>!c.archived_at&&(kind==='any'||c.kind===kind||c.kind==='both'));
+    const first=unresolvedName?`Choose a category for “${esc(unresolvedName)}”`:'Uncategorized';
+    return `<option value="">${first}</option>`+cats.map(c=>`<option value="${esc(c.id)}"${selected(c.id,value)}>${esc(c.name)}</option>`).join('');
   }
   function updateCount(){const n=state.data?.transactions?.total||0;$('#transactionCount').textContent=n>99?'99+':String(n);}
-  function setPage(page) {
+  function setMobileMore(open) {
+    const menu=$('#mobileMoreMenu'),button=$('[data-action="mobile-more"]');
+    if(!menu||!button)return;
+    menu.hidden=!open;button.setAttribute('aria-expanded',String(open));
+  }
+  function setPage(page,focusHeading=true,updateHash=true) {
     if(!$('#view-'+page))page='dashboard';
-    state.page=page;location.hash=page;
+    setMobileMore(false);
+    state.page=page;if(updateHash)location.hash=page;
     $$('[data-view]').forEach(el=>el.classList.toggle('hidden',el.dataset.view!==page));
-    $$('[data-page]').forEach(el=>el.classList.toggle('active',el.dataset.page===page));
+    $$('[data-page]').forEach(el=>{const active=el.dataset.page===page;el.classList.toggle('active',active);if(active)el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
+    $('[data-action="mobile-more"]')?.classList.toggle('active',['budgets','reports','categories','import','settings'].includes(page));
     const title={dashboard:'Dashboard',transactions:'Transactions',wallets:'Wallets',budgets:'Budgets',reports:'Reports',categories:'Categories',import:'Import & export',settings:'Settings'}[page]||'Dashboard';
     $('#crumbCurrent').textContent=title;document.title=`${title} · Wealth`;
     if(page==='transactions')loadTransactions();
@@ -74,7 +85,14 @@
     if(page==='budgets')renderBudgets();
     if(page==='categories')renderCategories();
     if(page==='settings')renderSettings();
+    syncSettingsSubsection(page==='settings'?'preferences':'');
     window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
+    if(focusHeading){const heading=$(`#view-${page} h1`);if(heading){heading.tabIndex=-1;requestAnimationFrame(()=>heading.focus({preventScroll:true}));}}
+  }
+  function syncSettingsSubsection(name){
+    const links=$$('.settings-nav a');if(!links.length)return;
+    const selected=links.find(link=>link.hash.slice(1)===name)||links[0];
+    links.forEach(link=>{const current=link===selected;link.classList.toggle('selected',current);if(current)link.setAttribute('aria-current','location');else link.removeAttribute('aria-current');});
   }
   function renderSelects(){
     const walletFilter=$('#filterWallet'), catFilter=$('#filterCategory'), pdfWallet=$('#pdfWallet'), currency=$('#displayCurrency');
@@ -106,8 +124,11 @@
   }
   function renderCashflow(d,from,to){
     const rows=(d.summary||[]);const chart=$('#cashflowChart');
-    if(!rows.length){chart.innerHTML=empty('Your first chapter starts here','Add a wallet and a transaction to see your cash flow.','chart');return;}
-    chart.innerHTML=`<div class="cashflow-list">${rows.map(r=>{const max=Math.max(1,Number(r.income_minor),Number(r.expense_minor));return `<section class="cashflow-currency"><div class="cashflow-currency-head"><strong>${esc(r.currency)}</strong><small>${esc(dateLabel(from,{month:'short',day:'numeric'}))} – ${esc(dateLabel(to,{month:'short',day:'numeric'}))}</small></div><div class="cashflow-row"><span>Income</span><div class="cashflow-track"><i class="income" style="width:${Math.max(0,Number(r.income_minor)*100/max)}%"></i></div><strong>${esc(money(r.income_minor,r.currency))}</strong></div><div class="cashflow-row"><span>Expenses</span><div class="cashflow-track"><i class="expense" style="width:${Math.max(0,Number(r.expense_minor)*100/max)}%"></i></div><strong>${esc(money(r.expense_minor,r.currency))}</strong></div></section>`;}).join('')}</div>`;
+    if(!rows.length){chart.removeAttribute('aria-describedby');chart.innerHTML=empty('Your first chapter starts here','Add a wallet and a transaction to see your cash flow.','chart');return;}
+    const start=dateLabel(from,{month:'short',day:'numeric'}),end=dateLabel(to,{month:'short',day:'numeric'});
+    const summary=rows.map(r=>`${r.currency}: income ${money(r.income_minor,r.currency)}, expenses ${money(r.expense_minor,r.currency)}, net ${money(Number(r.income_minor)-Number(r.expense_minor),r.currency)}.`).join(' ');
+    chart.setAttribute('aria-describedby','cashflowSummary');
+    chart.innerHTML=`<p id="cashflowSummary" class="sr-only">Cash flow from ${esc(start)} to ${esc(end)}. ${esc(summary)}</p><div class="cashflow-list">${rows.map(r=>{const max=Math.max(1,Number(r.income_minor),Number(r.expense_minor));return `<section class="cashflow-currency"><div class="cashflow-currency-head"><strong>${esc(r.currency)}</strong><small>${esc(start)} – ${esc(end)}</small></div><div class="cashflow-row"><span>Income</span><div class="cashflow-track"><i class="income" style="width:${Math.max(0,Number(r.income_minor)*100/max)}%"></i></div><strong>${esc(money(r.income_minor,r.currency))}</strong></div><div class="cashflow-row"><span>Expenses</span><div class="cashflow-track"><i class="expense" style="width:${Math.max(0,Number(r.expense_minor)*100/max)}%"></i></div><strong>${esc(money(r.expense_minor,r.currency))}</strong></div></section>`;}).join('')}</div>`;
   }
   function renderBudgetMini(budgets){
     const root=$('#dashboardBudgets');if(!budgets.length){root.innerHTML=empty('No budgets yet','Create one to give your plans a little shape.','chart');return;}
@@ -179,16 +200,20 @@
   function renderSettings(){
     const prefs=JSON.parse(localStorage.getItem('wealth.preferences')||'{}');$('#displayCurrency').value=prefs.currency||localStorage.getItem('wealth.displayCurrency')||'EUR';$('#themeSelect').value=prefs.theme||'light';$('#weekStart').value=prefs.weekStart||'monday';
   }
+  let modalReturnFocus=null;
   function modal(title,subtitle,fields,submitLabel='Save',wide=false){
-    $('#modalRoot').innerHTML=`<div class="modal-backdrop" data-backdrop><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-head"><div><p class="eyebrow">PRIVATE LEDGER</p><h2 id="modalTitle">${esc(title)}</h2>${subtitle?`<p>${esc(subtitle)}</p>`:''}</div><button type="button" class="modal-close" data-action="close-modal" aria-label="Close dialog">${icon('close')}</button></div><form class="modal-form" id="activeForm">${fields}<div class="modal-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit">${esc(submitLabel)}</button></div></form></section></div>`;
+    modalReturnFocus=document.activeElement;
+    $('#modalRoot').innerHTML=`<div class="modal-backdrop" data-backdrop><section class="modal ${wide?'wide':''}" role="dialog" aria-modal="true" aria-labelledby="modalTitle"${subtitle?' aria-describedby="modalDescription"':''}><div class="modal-head"><div><p class="eyebrow">PRIVATE LEDGER</p><h2 id="modalTitle">${esc(title)}</h2>${subtitle?`<p id="modalDescription">${esc(subtitle)}</p>`:''}</div><button type="button" class="modal-close" data-action="close-modal" aria-label="Close dialog">${icon('close')}</button></div><form class="modal-form" id="activeForm">${fields}<div class="modal-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary" type="submit">${esc(submitLabel)}</button></div></form></section></div>`;
+    bindFormValidation($('#activeForm'));
     const first=$('input,select,textarea,button', $('#activeForm'));if(first)first.focus();
   }
-  function field(label,name,value='',type='text',extra=''){
+  function field(label,name,value='',type='text',extra='',numericMin='0.01'){
     const id='f_'+name;
     if(type==='select')return `<div class="field ${extra.includes('full')?'full':''}"><label for="${id}">${esc(label)}</label><select id="${id}" name="${esc(name)}" ${extra.replace('full','')}>${value}</select></div>`;
     if(type==='textarea')return `<div class="field full"><label for="${id}">${esc(label)}</label><textarea id="${id}" name="${esc(name)}" maxlength="1000">${esc(value)}</textarea></div>`;
     if(type==='checkbox')return `<label class="toggle-field"><input type="checkbox" name="${esc(name)}" ${value?'checked':''}>${esc(label)}</label>`;
-    return `<div class="field ${extra.includes('full')?'full':''}"><label for="${id}">${esc(label)}</label><input id="${id}" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}" ${type==='number'?'min="0.01" step="0.01"':''} ${extra.replace('full','')}></div>`;
+    const numericConstraints=type==='number'?`${numericMin===null?'':`min="${numericMin}"`} step="0.01"`:'';
+    return `<div class="field ${extra.includes('full')?'full':''}"><label for="${id}">${esc(label)}</label><input id="${id}" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}" ${numericConstraints} ${extra.replace('full','')}></div>`;
   }
   function formData(form){const fd=new FormData(form),out={};for(const [k,v] of fd.entries())out[k]=v;for(const el of $$('input[type=checkbox]',form))out[el.name]=el.checked;return out;}
   function openTransaction(record=null){
@@ -216,7 +241,7 @@
   }
   function openWallet(wallet=null){
     const w=wallet||{};const types=['cash','checking','savings','credit','other'];const currencies=state.data.currencies.map(c=>c.code);
-    const fields=`${field('Wallet name','name',w.name||'','text','required maxlength="80"')}${field('Type','type',types.map(x=>`<option value="${x}"${selected(w.type||'cash',x)}>${x[0].toUpperCase()+x.slice(1)}</option>`).join(''),'select')}${field('Currency','currency',currencies.map(x=>`<option value="${x}"${selected(w.currency||'EUR',x)}>${x}</option>`).join(''),'select')}${field('Opening balance','opening_balance',w.opening_balance_minor!=null?major(w.opening_balance_minor,w.currency):'0','number','required inputmode="decimal"')}${field('Opening date','opening_date',w.opening_date||new Date().toISOString().slice(0,10),'date','required')}${w.id?field('Archived','archived',Boolean(w.archived_at),'checkbox'):''}`;
+    const fields=`${field('Wallet name','name',w.name||'','text','required maxlength="80"')}${field('Type','type',types.map(x=>`<option value="${x}"${selected(w.type||'cash',x)}>${x[0].toUpperCase()+x.slice(1)}</option>`).join(''),'select')}${field('Currency','currency',currencies.map(x=>`<option value="${x}"${selected(w.currency||'EUR',x)}>${x}</option>`).join(''),'select')}${field('Opening balance','opening_balance',w.opening_balance_minor!=null?major(w.opening_balance_minor,w.currency):'0','number','required inputmode="decimal"',null)}${field('Opening date','opening_date',w.opening_date||new Date().toISOString().slice(0,10),'date','required')}${w.id?field('Archived','archived',Boolean(w.archived_at),'checkbox'):''}`;
     modal(w.id?'Edit wallet':'Create wallet','Balances are derived from opening balance and ledger activity.',fields,w.id?'Save changes':'Create wallet');$('#activeForm').dataset.kind=w.id?'wallet-edit':'wallet-create';$('#activeForm').dataset.id=w.id||'';
     $('#f_currency').addEventListener('change',()=>{$('#f_opening_balance').step=currencyExponent($('#f_currency').value)===0?'1':'0.01';});
   }
@@ -234,8 +259,10 @@
     $('#f_period').addEventListener('change',updateMonthlyEnd);$('#f_start_date').addEventListener('change',updateMonthlyEnd);
   }
   function openDeleteConfirm(tx){
+    if(!modalReturnFocus?.isConnected)modalReturnFocus=document.activeElement;
     const transfer=tx.type==='transfer';const id=transfer?tx.transfer_id:tx.id;
-    $('#modalRoot').innerHTML=`<div class="modal-backdrop"><section class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle"><div class="modal-head"><div><p class="eyebrow">PLEASE CONFIRM</p><h2 id="confirmTitle">${transfer?'Remove this transfer?':'Delete this transaction?'}</h2></div><button class="modal-close" data-action="close-modal" aria-label="Close dialog">${icon('close')}</button></div><p class="dialog-message">${transfer?'Both linked transfer entries will be removed together.':'This entry will be hidden from totals and lists. The action can’t be undone in this version.'}</p><div class="modal-actions"><button class="button button-quiet" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete" data-kind="${transfer?'transfer':'transaction'}" data-id="${esc(id)}">${transfer?'Remove transfer':'Delete transaction'}</button></div></section></div>`;
+    $('#modalRoot').innerHTML=`<div class="modal-backdrop"><section class="modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmTitle" aria-describedby="deleteDescription"><div class="modal-head"><div><p class="eyebrow">PLEASE CONFIRM</p><h2 id="confirmTitle">${transfer?'Remove this transfer?':'Delete this transaction?'}</h2></div><button class="modal-close" data-action="close-modal" aria-label="Close dialog">${icon('close')}</button></div><p class="dialog-message" id="deleteDescription">${transfer?'Both linked transfer entries will be removed together.':'This entry will be hidden from totals and lists. The action can’t be undone in this version.'}</p><div class="modal-actions"><button class="button button-quiet" data-action="close-modal">Cancel</button><button class="button button-danger" data-action="confirm-delete" data-kind="${transfer?'transfer':'transaction'}" data-id="${esc(id)}">${transfer?'Remove transfer':'Delete transaction'}</button></div></section></div>`;
+    $('.modal [data-action="close-modal"]').focus();
   }
   function openBackupCreate(){
     const fields=`${field('Backup passphrase','passphrase','','password','required minlength="12" maxlength="1024" autocomplete="new-password"')}${field('Confirm passphrase','confirm','','password','required minlength="12" maxlength="1024" autocomplete="new-password"')}<div class="field full"><span class="field-hint">The passphrase is never stored. If you lose it, the backup cannot be recovered.</span></div>`;
@@ -244,6 +271,11 @@
   function openRestorePassphrase(){
     const fields=`<div class="field full"><label>Selected encrypted file</label><input value="${esc(state.restore?.fileName||'Backup file')}" readonly></div>${field('Passphrase','passphrase','','password','required autocomplete="current-password"')}`;
     modal('Unlock backup','We’ll validate it and show a preview before any records are changed.',fields,'Preview restore');$('#activeForm').dataset.kind='backup-preview';
+  }
+  function openRestoreConfirmation(mode,confirmation){
+    const fields=`<div class="field full"><label>Selected encrypted file</label><input value="${esc(state.restore?.fileName||'Backup file')}" readonly></div>${field('Passphrase','passphrase','','password','required autocomplete="current-password"')}`;
+    modal(mode==='replace'?'Confirm backup replacement':'Unlock backup to merge','The encrypted archive will be checked again before records are changed.',fields,mode==='replace'?'Replace my data':'Merge new records');
+    $('#activeForm').dataset.kind='backup-restore';$('#activeForm').dataset.restoreMode=mode;$('#activeForm').dataset.confirmation=confirmation||'';
   }
   async function onSubmit(form){
     const kind=form.dataset.kind,data=formData(form),id=form.dataset.id;
@@ -267,17 +299,71 @@
       if(kind==='backup-preview'){
         if(!state.restore?.content)throw new Error('Choose a backup file first.');
         const result=await api('/api/backup/preview',json('POST',{content_base64:state.restore.content,passphrase:data.passphrase}));
-        state.restore.preview=result.preview;state.restore.payload=result.payload;state.restore.passphrase=data.passphrase;closeModal();renderRestorePreview();return;
+        state.restore.preview=result.preview;closeModal();renderRestorePreview();return;
+      }
+      if(kind==='backup-restore'){
+        if(!state.restore?.content)throw new Error('Choose a backup file first.');
+        const mode=form.dataset.restoreMode;
+        const result=await api('/api/backup/restore',json('POST',{content_base64:state.restore.content,passphrase:data.passphrase,mode,confirmation:form.dataset.confirmation}));
+        state.restore=null;$('#importReview').innerHTML='';closeModal();await refresh();toast(`${result.inserted.transactions} transactions restored. Review complete.`,'success');return;
       }
       closeModal();await refresh();if(state.page==='transactions')await loadTransactions();toast(kind?.includes('edit')?'Changes saved.':'Saved on this device.','success');
     }catch(e){showFormError(form,e.message);}
   }
-  function showFormError(form,message){let node=$('.form-error',form);if(!node){node=document.createElement('div');node.className='form-error';form.prepend(node);}node.textContent=message;}
-  function closeModal(){ $('#modalRoot').innerHTML=''; }
+  function addDescription(control,id){const ids=(control.getAttribute('aria-describedby')||'').split(/\s+/).filter(Boolean);if(!ids.includes(id))ids.push(id);control.setAttribute('aria-describedby',ids.join(' '));}
+  function removeDescription(control,id){const ids=(control.getAttribute('aria-describedby')||'').split(/\s+/).filter(x=>x&&x!==id);if(ids.length)control.setAttribute('aria-describedby',ids.join(' '));else control.removeAttribute('aria-describedby');}
+  function clearFieldError(control){
+    const id=control.dataset.errorId;if(!id)return;
+    document.getElementById(id)?.remove();removeDescription(control,id);control.removeAttribute('aria-invalid');delete control.dataset.errorId;
+  }
+  function setFieldError(form,control,message){
+    if(!control)return;
+    clearFieldError(control);
+    const id=`field-error-${control.id||control.name||'control'}`;
+    const node=document.createElement('div');node.className='form-error';node.id=id;node.setAttribute('role','status');node.setAttribute('aria-live','polite');node.setAttribute('aria-atomic','true');node.textContent=message;
+    (control.closest('.field')||control.parentElement||form).append(node);
+    control.dataset.errorId=id;control.setAttribute('aria-invalid','true');addDescription(control,id);
+  }
+  function clearFormErrors(form){
+    $$('.form-error',form).forEach(node=>node.remove());
+    $$('[aria-invalid="true"]',form).forEach(control=>{if(control.dataset.errorId)removeDescription(control,control.dataset.errorId);delete control.dataset.errorId;control.removeAttribute('aria-invalid');});
+    form.removeAttribute('aria-describedby');delete form.dataset.generalErrorId;
+  }
+  function validationField(form,message){
+    const kind=form.dataset.kind||'';const rules=[
+      [/passphrases do not match|confirm(?:ation)? passphrase/i,'confirm'],[/passphrase|password/i,'passphrase'],
+      [/opening date/i,'opening_date'],[/opening balance|balance/i,'opening_balance'],
+      [/start date/i,'start_date'],[/end date/i,'end_date'],[/transaction date|date/i,form.elements.start_date?'start_date':'transaction_date'],
+      [/currency/i,'currency'],[/category/i,'category_id'],[/wallet/i,kind.startsWith('transfer')?'source_wallet_id':'wallet_id'],
+      [/amount|positive|decimal/i,'amount'],[/period/i,'period'],[/type/i,'type'],[/name/i,'name']
+    ];
+    for(const [pattern,name] of rules){if(pattern.test(message)){const control=form.elements.namedItem(name);if(control)return control;}}
+    return null;
+  }
+  function showFormError(form,message,control=null){
+    clearFormErrors(form);const target=control||validationField(form,message);
+    if(target){setFieldError(form,target,message);target.focus();return;}
+    const node=document.createElement('div');node.className='form-error';node.id=`form-error-${form.dataset.kind||'form'}`;node.setAttribute('role','status');node.setAttribute('aria-live','polite');node.setAttribute('aria-atomic','true');node.textContent=message;form.prepend(node);form.dataset.generalErrorId=node.id;form.setAttribute('aria-describedby',node.id);
+  }
+  function bindFormValidation(form){
+    form.addEventListener('invalid',event=>{if(event.target.matches('input,select,textarea'))setFieldError(form,event.target,event.target.validationMessage);},true);
+    ['input','change'].forEach(type=>form.addEventListener(type,event=>{
+      const control=event.target;if(!control.matches('input,select,textarea'))return;
+      if(control.checkValidity())clearFieldError(control);
+      if(form.dataset.generalErrorId){document.getElementById(form.dataset.generalErrorId)?.remove();form.removeAttribute('aria-describedby');delete form.dataset.generalErrorId;}
+    }));
+  }
+  function closeModal(){
+    $('#modalRoot').innerHTML='';
+    if(modalReturnFocus?.isConnected)modalReturnFocus.focus();
+    modalReturnFocus=null;
+  }
   function downloadBlob(blob,name){const a=document.createElement('a');const url=URL.createObjectURL(blob);a.href=url;a.download=name;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
   function renderImportReview(review){
     state.review=review;const root=$('#importReview'),rows=review.rows||[];
-    root.innerHTML=`<article class="surface review-panel"><div class="review-top"><div><p class="eyebrow">STAGED · NOT SAVED</p><h2>Review ${rows.length} candidate row${rows.length===1?'':'s'}</h2><p>${review.accepted_count} ready · ${review.review_count} need your attention. Nothing is saved until you confirm.</p></div><button class="icon-button" data-action="cancel-import" aria-label="Cancel import">${icon('close')}</button></div><div class="review-scroll"><table class="review-table"><thead><tr><th>INCLUDE</th><th>DATE</th><th>TYPE</th><th>AMOUNT</th><th>WALLET</th><th>CATEGORY</th><th>DESCRIPTION</th><th>NOTES</th><th>REVIEW</th></tr></thead><tbody>${rows.map(r=>`<tr data-row-id="${esc(r.id)}"><td><input type="checkbox" data-col="accepted" ${r.accepted?'checked':''} aria-label="Include row ${r.row_number}"></td><td><input data-col="transaction_date" type="date" value="${esc(r.transaction_date||'')}"></td><td><select data-col="type"><option value="expense"${selected(r.type,'expense')}>Expense</option><option value="income"${selected(r.type,'income')}>Income</option></select></td><td><input data-col="amount" inputmode="decimal" value="${r.amount_minor!=null?esc(major(r.amount_minor,r.currency)):''}" aria-label="Amount"></td><td><select data-col="wallet_id">${walletOptions(r.wallet_id)}</select></td><td><select data-col="category_id">${categoryOptions(r.category_id,r.type)}</select></td><td><input data-col="description" maxlength="180" value="${esc(r.description||'')}" aria-label="Description"></td><td><input data-col="notes" maxlength="500" value="${esc(r.notes||'')}" aria-label="Notes"></td><td><span class="review-warn">${esc((r.warnings||[]).join(' · ')||'Ready')}</span></td></tr>`).join('')}</tbody></table></div><div class="review-actions"><span class="field-hint" style="margin-right:auto">Possible duplicates are flagged; verify before including.</span><button class="button button-quiet" data-action="cancel-import">Discard</button><button class="button button-primary" data-action="commit-import">Save selected rows</button></div></article>`;
+    const delimiterLabel=review.delimiter===','?'comma (,)':review.delimiter===';'?'semicolon (;)':null;
+    root.innerHTML=`<article class="surface review-panel"><div class="review-top"><div><p class="eyebrow">STAGED · NOT SAVED</p><h2 id="importReviewTitle" tabindex="-1">Review ${rows.length} candidate row${rows.length===1?'':'s'}</h2><p>${delimiterLabel?`Parsed using ${delimiterLabel} delimiter. `:''}${review.accepted_count} ready · ${review.review_count} need your attention. Nothing is saved until you confirm.</p></div><button class="icon-button" data-action="cancel-import" aria-label="Cancel import">${icon('close')}</button></div><div class="review-scroll"><table class="review-table"><caption class="sr-only">Review imported transaction rows. Each control name includes its row number.</caption><thead><tr><th scope="col">INCLUDE</th><th scope="col">DATE</th><th scope="col">TYPE</th><th scope="col">AMOUNT</th><th scope="col">WALLET</th><th scope="col">CATEGORY</th><th scope="col">DESCRIPTION</th><th scope="col">NOTES</th><th scope="col">REVIEW</th></tr></thead><tbody>${rows.map((r,index)=>{const rowNumber=r.row_number||index+1,unresolvedType=!r.type,unresolvedCategory=(r.warnings||[]).some(w=>w.startsWith('Category not found'));return `<tr data-row-id="${esc(r.id)}"><td><input type="checkbox" data-col="accepted" ${r.accepted?'checked':''} aria-label="Include imported row ${rowNumber}"></td><td><input data-col="transaction_date" type="date" value="${esc(r.transaction_date||'')}" aria-label="Date for imported row ${rowNumber}"></td><td><select data-col="type" aria-label="Transaction type for imported row ${rowNumber}"><option value=""${unresolvedType?' selected':''}>Choose income or expense</option><option value="expense"${selected(r.type,'expense')}>Expense</option><option value="income"${selected(r.type,'income')}>Income</option></select></td><td><input data-col="amount" inputmode="decimal" value="${r.amount_minor!=null?esc(major(r.amount_minor,r.currency)):''}" aria-label="Amount for imported row ${rowNumber}"></td><td><select data-col="wallet_id" aria-label="Wallet for imported row ${rowNumber}">${walletOptions(r.wallet_id)}</select></td><td><select data-col="category_id" aria-label="Category for imported row ${rowNumber}">${categoryOptions(r.category_id,unresolvedType?'any':r.type,unresolvedCategory?r.category_name:'')}</select></td><td><textarea data-col="description" maxlength="180" rows="2" aria-label="Description for imported row ${rowNumber}">${esc(r.description||'')}</textarea></td><td><input data-col="notes" maxlength="500" value="${esc(r.notes||'')}" aria-label="Notes for imported row ${rowNumber}"></td><td><span class="review-warn">${esc((r.warnings||[]).join(' · ')||'Ready')}</span></td></tr>`;}).join('')}</tbody></table></div><div class="review-actions"><span class="field-hint" style="margin-right:auto">Possible duplicates are flagged; verify before including.</span><button class="button button-quiet" data-action="cancel-import">Discard</button><button class="button button-primary" data-action="commit-import">Save selected rows</button></div></article>`;
+    $('#importReviewTitle').focus({preventScroll:true});
   }
   function gatherReviewRows(){
     return $$('#importReview tbody tr').map(row=>{
@@ -292,13 +378,13 @@
   function renderRestorePreview(){
     const p=state.restore?.preview;if(!p)return;const root=$('#importReview');
     const rows=Object.entries(p.counts).map(([table,count])=>`<div class="setting-row"><span><strong>${esc(table.replace(/_/g,' '))}</strong></span><span>${count} records · ${p.conflicts[table]} matching IDs already on this device</span></div>`).join('');
-    root.innerHTML=`<article class="surface review-panel"><div class="review-top"><div><p class="eyebrow">RESTORE PREVIEW · NOT APPLIED</p><h2>Review backup contents</h2><p>Choose merge to add records with new IDs. Existing IDs are kept. Replacement clears current records and requires an additional typed confirmation.</p></div></div>${rows}<div class="review-actions"><button class="button button-quiet" data-action="clear-restore">Cancel</button><button class="button button-secondary" data-action="restore-merge">Merge new records</button><button class="button button-danger" data-action="restore-replace">Replace my data…</button></div></article>`;
+    root.innerHTML=`<article class="surface review-panel"><div class="review-top"><div><p class="eyebrow">RESTORE PREVIEW · NOT APPLIED</p><h2 id="restorePreviewTitle" tabindex="-1">Backup preview ready</h2><p>Choose merge to add records with new IDs. Existing IDs are kept. Replacement clears current records and requires an additional typed confirmation.</p></div></div>${rows}<div class="review-actions"><button class="button button-quiet" data-action="clear-restore">Cancel</button><button class="button button-secondary" data-action="restore-merge">Merge new records</button><button class="button button-danger" data-action="restore-replace">Replace my data…</button></div></article>`;
+    $('#restorePreviewTitle').focus({preventScroll:true});
   }
   async function restore(mode){
-    if(!state.restore) return;let confirmation;
+    if(!state.restore) return;let confirmation='';
     if(mode==='replace'){confirmation=prompt('This replaces all current local records. Type REPLACE MY DATA to continue.');if(confirmation!=='REPLACE MY DATA')return;}
-    try{const result=await api('/api/backup/restore',json('POST',{content_base64:state.restore.content,passphrase:state.restore.passphrase,mode,confirmation}));state.restore=null;$('#importReview').innerHTML='';await refresh();toast(`${result.inserted.transactions} transactions restored. Review complete.`,'success');}
-    catch(e){fail(e);}
+    openRestoreConfirmation(mode,confirmation);
   }
   async function exportCsv(){
     const q=new URLSearchParams();if($('#exportFrom').value)q.set('from',$('#exportFrom').value);if($('#exportTo').value)q.set('to',$('#exportTo').value);
@@ -309,6 +395,7 @@
     const nav=e.target.closest('[data-page]');if(nav){e.preventDefault();setPage(nav.dataset.page);return;}
     const action=e.target.closest('[data-action]');if(!action)return;
     const id=action.dataset.id, kind=action.dataset.action;
+    if(kind==='mobile-more'){setMobileMore($('#mobileMoreMenu').hidden);return;}
     if(kind==='close-modal'){closeModal();return;}
     if(kind==='add-transaction'){openTransaction();return;}
     if(kind==='add-transfer'){openTransfer();return;}
@@ -356,15 +443,18 @@
     const file=e.target.files?.[0];if(!file)return;e.target.value='';
     try{
       if(e.target.id==='csvFile'){
-        if(file.size>2*1024*1024)throw new Error('CSV file is too large. Limit is 2 MB.');
-        const content=await file.text();const result=await api('/api/imports/csv/preview',json('POST',{file_name:file.name,content}));renderImportReview(result);toast('Import preview ready. No rows have been saved.');
+        if(file.size>MAX_CSV_FILE_BYTES)throw new Error('CSV file is too large. Limit is 2 MiB.');
+        const bytes=await file.arrayBuffer();let content;
+        try{content=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch(_){throw new Error('CSV file must use valid UTF-8 encoding.');}
+        const delimiter=$('#csvDelimiter').value;
+        const result=await api('/api/imports/csv/preview',json('POST',{file_name:file.name,content,delimiter}));renderImportReview(result);toast('Import preview ready. No rows have been saved.');
       } else if(e.target.id==='pdfFile'){
-        if(file.size>8*1024*1024)throw new Error('PDF file is too large. Limit is 8 MB.');
+        if(file.size>MAX_PDF_FILE_BYTES)throw new Error('PDF file is too large. Limit is 8 MiB.');
         const wallet=$('#pdfWallet').value;if(!wallet)throw new Error('Choose a destination wallet first.');
         const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
         const result=await api('/api/imports/pdf/preview',json('POST',{file_name:file.name,content_base64:btoa(binary),wallet_id:wallet,currency:$('#pdfCurrency').value.toUpperCase()}));renderImportReview(result);toast('PDF candidates extracted locally. Review every row before saving.');
       } else if(e.target.id==='backupFile'){
-        if(file.size>12*1024*1024)throw new Error('Backup file is too large. Limit is 12 MB.');
+        if(file.size>MAX_BACKUP_FILE_BYTES)throw new Error('Backup file is too large. Limit is 8 MiB.');
         const bytes=new Uint8Array(await file.arrayBuffer());let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));
         state.restore={fileName:file.name,content:btoa(binary)};openRestorePassphrase();
       }
@@ -372,11 +462,24 @@
   }
   let searchTimer;
   function bind(){
-    document.addEventListener('click',e=>{onClick(e).catch(fail);if(e.target.matches('[data-backdrop]'))closeModal();});
+    document.addEventListener('click',e=>{onClick(e).catch(fail);if(e.target.matches('[data-backdrop]'))closeModal();if(!e.target.closest('.mobile-more-menu')&&!e.target.closest('[data-action="mobile-more"]'))setMobileMore(false);});
     document.addEventListener('submit',e=>{if(e.target.id==='activeForm'){e.preventDefault();onSubmit(e.target);}});
-    document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('#modalRoot').innerHTML)closeModal();if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus();}});
-    ['transactionSearch','filterWallet','filterType','filterCategory'].forEach(id=>$('#'+id).addEventListener(id==='transactionSearch'?'input':'change',()=>{state.transactionOffset=0;clearTimeout(searchTimer);searchTimer=setTimeout(loadTransactions,180);}));
-    $('#globalSearch').addEventListener('input',()=>{if(state.page!=='transactions')setPage('transactions');$('#transactionSearch').value=$('#globalSearch').value;clearTimeout(searchTimer);searchTimer=setTimeout(loadTransactions,180);});
+    document.addEventListener('keydown',e=>{
+      const dialog=$('#modalRoot [aria-modal="true"]');
+      if(dialog&&e.key==='Escape'){e.preventDefault();closeModal();return;}
+      if(!dialog&&e.key==='Escape'&&!$('#mobileMoreMenu').hidden){e.preventDefault();setMobileMore(false);$('[data-action="mobile-more"]').focus();return;}
+      if(dialog&&e.key==='Tab'){
+        const controls=$$('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])',dialog).filter(el=>el.getClientRects().length);
+        if(!controls.length){e.preventDefault();dialog.focus();return;}
+        const first=controls[0],last=controls[controls.length-1];
+        if(!dialog.contains(document.activeElement)){e.preventDefault();(e.shiftKey?last:first).focus();}
+        else if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+        else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+      }
+      if(!dialog&&(e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#globalSearch').focus();}
+    });
+    ['transactionSearch','filterWallet','filterType','filterCategory'].forEach(id=>$('#'+id).addEventListener(id==='transactionSearch'?'input':'change',()=>{state.transactionOffset=0;clearTimeout(searchTimer);searchTimer=setTimeout(loadTransactions,300);}));
+    $('#globalSearch').addEventListener('input',()=>{if(state.page!=='transactions')setPage('transactions',false);$('#transactionSearch').value=$('#globalSearch').value;clearTimeout(searchTimer);searchTimer=setTimeout(loadTransactions,300);});
     $('#dashboardRange').addEventListener('change',()=>{if(state.data){const [from,to]=currentRange();api('/api/reports?'+new URLSearchParams({from,to})).then(()=>refresh()).catch(fail);}});
     $('#pagePrev').addEventListener('click',()=>{state.transactionOffset=Math.max(0,state.transactionOffset-state.transactionLimit);loadTransactions();});
     $('#pageNext').addEventListener('click',()=>{state.transactionOffset+=state.transactionLimit;loadTransactions();});
@@ -386,8 +489,27 @@
   function boot(){
     const prefs=JSON.parse(localStorage.getItem('wealth.preferences')||'{}');document.body.dataset.theme=prefs.theme||'light';
     if('serviceWorker' in navigator)navigator.serviceWorker.register('/service-worker.js').catch(()=>{});
-    bind();setPage(location.hash.slice(1)||'dashboard');refresh();
-    window.addEventListener('hashchange',()=>{const page=location.hash.slice(1);if(page&&page!==state.page)setPage(page);});
+    bind();
+    const initialHash=location.hash.slice(1),initialView=$('#view-'+initialHash);
+    const settingsSubsections=['preferences','privacy','sync'];
+    const initialSettingsSubsection=settingsSubsections.includes(initialHash);
+    const initialPage=initialView?initialHash:(initialSettingsSubsection?'settings':'dashboard');
+    setPage(initialPage,false,!initialSettingsSubsection);refresh();
+    if(initialPage==='settings')syncSettingsSubsection(initialSettingsSubsection?initialHash:'preferences');
+    if(initialPage==='settings'&&initialHash!==initialPage)requestAnimationFrame(()=>$('#'+CSS.escape(initialHash))?.scrollIntoView());
+    window.addEventListener('hashchange',()=>{
+      const destination=location.hash.slice(1);
+      if(settingsSubsections.includes(destination)){
+        if(state.page!=='settings')setPage('settings',true,false);
+        syncSettingsSubsection(destination);
+        requestAnimationFrame(()=>$('#'+CSS.escape(destination))?.scrollIntoView());
+        return;
+      }
+      if(destination&&$('#view-'+destination)){
+        if(destination!==state.page)setPage(destination);
+        else if(destination==='settings')syncSettingsSubsection('preferences');
+      }
+    });
     window.addEventListener('online',()=>toast('Connection to the local app restored.','success'));
   }
   boot();

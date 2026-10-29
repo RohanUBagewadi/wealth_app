@@ -1,6 +1,36 @@
 .venv/
+# Local research artifacts, including browser profiles, must never be committed.
+rea_work/
 instance/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .DS_Store
+
+# Local database files and SQLite journal sidecars
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db
+*.db-*
+
+# Local exports, encrypted backup archives, and import documents
+*.wbackup
+exports/
+statements/
+private_imports/
+
+# Local configuration, credentials, and logs
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+*.log
+
+# IDE state that may contain local paths and recent-file metadata
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/shelf/
+.idea/httpRequests/

@@ -34,6 +34,16 @@ WALLET_TYPES = {"cash", "checking", "savings", "credit", "other"}
 TRANSACTION_TYPES = {"expense", "income"}
 MAX_MINOR = 10**15
 LOCAL_OWNER = "local"
+MAX_BACKUP_PAYLOAD_BYTES = 5 * 1024 * 1024
+
+
+def formula_safe_csv_cell(value: Any) -> str:
+    """Keep spreadsheet software from evaluating user-controlled CSV text."""
+    text = "" if value is None else str(value)
+    probe = text.lstrip(" \t\r\n")
+    if text.startswith(("\t", "\r", "\n")) or probe.startswith(("=", "+", "-", "@")):
+        return "'" + text
+    return text
 
 
 def now_iso() -> str:
@@ -380,6 +390,14 @@ class FinanceStore:
             has_children = c.execute("SELECT 1 FROM categories WHERE parent_id=? LIMIT 1", (category_id,)).fetchone()
             if has_children and parent_id:
                 raise FinanceError("A category with subcategories cannot become a subcategory.")
+            if has_children:
+                children = c.execute("SELECT kind FROM categories WHERE parent_id=?", (category_id,)).fetchall()
+                incompatible = any(
+                    kind not in (child["kind"], "both") and child["kind"] != "both"
+                    for child in children
+                )
+                if incompatible:
+                    raise FinanceError("Category type cannot change because it would make a subcategory incompatible.")
             icon = safe_text(data.get("icon", old["icon"]), "Icon", 32, True)
             color = str(data.get("color", old["color"]))
             if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
@@ -763,8 +781,17 @@ class FinanceStore:
                 except FinanceError:
                     tx_date = None
                     warnings.append("Date needs review")
-                tx_type = str(raw.get("type") or "expense").lower()
-                if tx_type not in TRANSACTION_TYPES:
+                raw_type = str(raw.get("type") or "").strip().lower()
+                if raw_type in TRANSACTION_TYPES:
+                    tx_type = raw_type
+                elif source_type == "csv_import":
+                    tx_type = None
+                    if raw_type:
+                        shown_type = raw_type[:40]
+                        warnings.append("Unsupported transaction type '{}'; choose income or expense".format(shown_type))
+                    else:
+                        warnings.append("Transaction type is missing; choose income or expense")
+                else:
                     tx_type = "expense"
                     warnings.append("Type needs review")
                 currency = str(raw.get("currency") or "").upper()
@@ -788,6 +815,8 @@ class FinanceStore:
                 if not category_id and category_name:
                     cat = category_by_name.get(category_name.casefold())
                     category_id = cat["id"] if cat else None
+                    if cat is None:
+                        warnings.append("Category not found; choose an existing category")
                 description = safe_text(raw.get("description"), "Description", 180)
                 notes = safe_text(raw.get("notes"), "Notes", 1000)
                 row = {"id": row_id, "row_number": index, "transaction_date": tx_date, "type": tx_type,
@@ -795,7 +824,7 @@ class FinanceStore:
                        "wallet_id": wallet["id"] if wallet else None, "wallet_name": wallet["name"] if wallet else None,
                        "category_id": category_id, "category_name": category_name, "description": description,
                        "notes": notes, "warnings": warnings, "accepted": not warnings}
-                if amount and tx_date and wallet:
+                if amount and tx_date and wallet and tx_type:
                     candidate = {"transaction_date":tx_date,"amount_minor":amount,"currency":row["currency"],
                                  "wallet_id":wallet["id"],"type":tx_type,"description":description}
                     row["fingerprint"] = self._transaction_fingerprint(candidate)
@@ -839,6 +868,14 @@ class FinanceStore:
                 patch=updates.get(old["id"],{})
                 if not patch.get("accepted",bool(old["accepted"])):
                     continue
+                warnings=json.loads(old["warnings"] or "[]")
+                if batch["source_type"]=="csv_import":
+                    if any(w.startswith(("Transaction type is missing", "Unsupported transaction type")) for w in warnings):
+                        if patch.get("type") not in TRANSACTION_TYPES:
+                            raise FinanceError("Choose income or expense for every accepted row with an unresolved type.")
+                    if any(w.startswith("Category not found") for w in warnings):
+                        if not patch.get("category_id"):
+                            raise FinanceError("Choose an existing category for every accepted row with an unmapped category.")
                 data={"transaction_date":patch.get("transaction_date",old["transaction_date"]),
                       "type":patch.get("type",old["type"]),"amount_minor":patch.get("amount_minor",old["amount_minor"]),
                       "currency":patch.get("currency",old["currency"]),"wallet_id":patch.get("wallet_id",old["wallet_id"]),
@@ -884,62 +921,388 @@ class FinanceStore:
         for t in rows:
             if t["type"]=="transfer":
                 continue
-            description=t["description"] or ""
-            notes=t["notes"] or ""
-            def formula_safe(v: str) -> str:
-                return "'"+v if v.startswith(("=","+","-","@")) else v
-            writer.writerow([t["transaction_date"],t["type"],minor_to_decimal_string(t["amount_minor"],t["currency"]),
-                             t["currency"],t["wallet_name"],t["category_name"] or "",formula_safe(description),formula_safe(notes)])
+            values=[t["transaction_date"],t["type"],minor_to_decimal_string(t["amount_minor"],t["currency"]),
+                    t["currency"],t["wallet_name"],t["category_name"] or "",t["description"] or "",t["notes"] or ""]
+            writer.writerow([formula_safe_csv_cell(value) for value in values])
         return out.getvalue()
 
-    def backup_payload(self) -> Dict[str, Any]:
+    def backup_payload(self, max_bytes: Optional[int] = MAX_BACKUP_PAYLOAD_BYTES,
+                       size_error: str = "Backup data exceeds the 5 MiB limit.") -> Dict[str, Any]:
+        """Build the v1 snapshot incrementally, optionally bounding its JSON size.
+
+        The bound is measured using the same compact UTF-8 JSON encoding used
+        for backup serialization. Rows are appended only after they fit, so an
+        oversized snapshot stops reading the result cursor immediately.
+        """
+        if max_bytes is not None and (type(max_bytes) is not int or max_bytes < 0):
+            raise FinanceError("Backup size limit is invalid.")
+        tables=("wallets","categories","transactions","transfers","budgets")
+        data={table:[] for table in tables}
+        payload={"format":"wealth-app-backup","version":1,"created_at":now_iso(),"data":data}
+        encoder=json.JSONEncoder(separators=(",",":"),ensure_ascii=False)
+        current_size=sum(len(chunk.encode("utf-8")) for chunk in encoder.iterencode(payload))
+        if max_bytes is not None and current_size > max_bytes:
+            raise FinanceError(size_error)
         with self._lock:
-            payload={}
-            for table in ("wallets","categories","transactions","transfers","budgets"):
-                payload[table]=[dict(r) for r in self.conn.execute("SELECT * FROM {} WHERE owner_id=?".format(table),(LOCAL_OWNER,)).fetchall()]
-        return {"format":"wealth-app-backup","version":1,"created_at":now_iso(),"data":payload}
+            for table in tables:
+                rows=data[table]
+                cursor=self.conn.execute("SELECT * FROM {} WHERE owner_id=?".format(table),(LOCAL_OWNER,))
+                for row in cursor:
+                    record=dict(row)
+                    item_size=0
+                    comma_size=1 if rows else 0
+                    for chunk in encoder.iterencode(record):
+                        item_size+=len(chunk.encode("utf-8"))
+                        if max_bytes is not None and current_size+comma_size+item_size > max_bytes:
+                            raise FinanceError(size_error)
+                    rows.append(record)
+                    current_size+=comma_size+item_size
+        return payload
 
     def preview_restore(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        if not isinstance(payload,dict) or payload.get("format")!="wealth-app-backup" or payload.get("version")!=1:
+        tables=("wallets","categories","transactions","transfers","budgets")
+        if (not isinstance(payload,dict) or set(payload)!={"format","version","created_at","data"}
+                or payload.get("format")!="wealth-app-backup" or type(payload.get("version")) is not int
+                or payload.get("version")!=1):
             raise FinanceError("Backup format or version is unsupported.")
         data=payload.get("data")
-        required=("wallets","categories","transactions","transfers","budgets")
-        if not isinstance(data,dict) or any(not isinstance(data.get(k),list) for k in required):
+        if not isinstance(data,dict) or set(data)!=set(tables):
             raise FinanceError("Backup structure is invalid.")
-        for rows in data.values():
+
+        def record_error():
+            raise FinanceError("Backup contains an invalid record.")
+
+        def valid_id(value):
+            if not isinstance(value,str) or not re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",value):
+                record_error()
+            try:
+                if str(uuid.UUID(value))!=value:
+                    record_error()
+            except (ValueError,AttributeError):
+                record_error()
+            return value
+
+        def valid_text(value,maximum,required=False):
+            if not isinstance(value,str) or len(value)>maximum or value!=value.strip() or (required and not value):
+                record_error()
+            if not required and not value:
+                record_error()
+            return value
+
+        def valid_nullable_text(value,maximum):
+            if value is not None:
+                valid_text(value,maximum)
+
+        def valid_time(value,nullable=False):
+            if value is None and nullable:
+                return
+            if not isinstance(value,str) or len(value)>40:
+                record_error()
+            try:
+                parsed=datetime.fromisoformat(value)
+            except (ValueError,TypeError):
+                record_error()
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                record_error()
+
+        def valid_date(value):
+            if not isinstance(value,str):
+                record_error()
+            try:
+                if date.fromisoformat(value).isoformat()!=value:
+                    record_error()
+            except ValueError:
+                record_error()
+
+        def valid_currency(value):
+            if not isinstance(value,str) or value not in CURRENCY_EXPONENTS:
+                record_error()
+
+        def valid_integer(value,minimum=None,maximum=None):
+            if type(value) is not int or (minimum is not None and value<minimum) or (maximum is not None and value>maximum):
+                record_error()
+
+        def valid_timestamp_field(row,key,nullable=False):
+            valid_time(row[key],nullable)
+
+        field_sets={
+            "wallets":set("id owner_id name type currency opening_balance_minor opening_date archived_at created_at updated_at version".split()),
+            "categories":set("id owner_id name kind parent_id icon color is_system archived_at created_at updated_at version".split()),
+            "transactions":set("id owner_id wallet_id type amount_minor currency transaction_date category_id description payee notes tags source import_batch_id fingerprint transfer_id transfer_side created_at updated_at deleted_at version".split()),
+            "transfers":set("id owner_id source_wallet_id destination_wallet_id amount_minor currency transaction_date note created_at updated_at version".split()),
+            "budgets":set("id owner_id name period start_date end_date amount_minor currency scope category_id wallet_id rollover archived_at created_at updated_at version".split()),
+        }
+        validated={}
+        for table in tables:
+            rows=data[table]
             if not isinstance(rows,list) or len(rows)>100000:
-                raise FinanceError("Backup contains too many records.")
+                raise FinanceError("Backup contains too many records or has an invalid structure.")
+            ids=set()
+            for row in rows:
+                if not isinstance(row,dict) or set(row)-field_sets[table] or field_sets[table]-set(row)-{"owner_id"}:
+                    raise FinanceError("Backup record structure is invalid.")
+                if "owner_id" in row and row["owner_id"] not in (None,LOCAL_OWNER):
+                    raise FinanceError("Backup owner scope is invalid.")
+                record_id=valid_id(row["id"])
+                if record_id in ids:
+                    raise FinanceError("Backup has duplicate record identifiers.")
+                ids.add(record_id)
+                valid_integer(row["version"],1,2**63-1)
+                valid_timestamp_field(row,"created_at")
+                valid_timestamp_field(row,"updated_at")
+                if table=="wallets":
+                    valid_text(row["name"],80,True)
+                    if not isinstance(row["type"],str) or row["type"] not in WALLET_TYPES:
+                        record_error()
+                    valid_currency(row["currency"])
+                    valid_integer(row["opening_balance_minor"],-MAX_MINOR,MAX_MINOR)
+                    valid_date(row["opening_date"])
+                    valid_timestamp_field(row,"archived_at",True)
+                elif table=="categories":
+                    valid_text(row["name"],60,True)
+                    if row["kind"] not in ("expense","income","both"):
+                        record_error()
+                    if row["parent_id"] is not None:
+                        valid_id(row["parent_id"])
+                    valid_text(row["icon"],32,True)
+                    if not isinstance(row["color"],str) or not re.fullmatch(r"#[0-9a-fA-F]{6}",row["color"]):
+                        raise FinanceError("Backup contains an invalid category color.")
+                    valid_integer(row["is_system"],0,1)
+                    valid_timestamp_field(row,"archived_at",True)
+                elif table=="transfers":
+                    valid_id(row["source_wallet_id"])
+                    valid_id(row["destination_wallet_id"])
+                    valid_integer(row["amount_minor"],1,MAX_MINOR)
+                    valid_currency(row["currency"])
+                    valid_date(row["transaction_date"])
+                    valid_nullable_text(row["note"],180)
+                elif table=="transactions":
+                    valid_id(row["wallet_id"])
+                    if row["type"] not in ("expense","income","transfer"):
+                        record_error()
+                    valid_integer(row["amount_minor"],1,MAX_MINOR)
+                    valid_currency(row["currency"])
+                    valid_date(row["transaction_date"])
+                    if row["category_id"] is not None:
+                        valid_id(row["category_id"])
+                    valid_nullable_text(row["description"],180)
+                    valid_nullable_text(row["payee"],120)
+                    valid_nullable_text(row["notes"],1000)
+                    if row["tags"] is None and row["type"]=="transfer":
+                        pass  # Transfer legs are inserted without a tags value.
+                    else:
+                        if not isinstance(row["tags"],str):
+                            record_error()
+                        try:
+                            tags=json.loads(row["tags"])
+                        except (ValueError,TypeError):
+                            record_error()
+                        if (not isinstance(tags,list) or len(tags)>20 or
+                                any(not isinstance(tag,str) or len(tag)>40 for tag in tags)):
+                            record_error()
+                    if row["source"] not in ("manual","csv_import","pdf_import"):
+                        record_error()
+                    if row["import_batch_id"] is not None:
+                        valid_id(row["import_batch_id"])
+                    if row["source"]=="manual" and row["import_batch_id"] is not None:
+                        record_error()
+                    if row["source"] in ("csv_import","pdf_import") and row["import_batch_id"] is None:
+                        record_error()
+                    fingerprint=row["fingerprint"]
+                    if fingerprint is not None and (not isinstance(fingerprint,str) or not re.fullmatch(r"[0-9a-fA-F]{64}",fingerprint)):
+                        record_error()
+                    if row["transfer_id"] is not None:
+                        valid_id(row["transfer_id"])
+                    if row["transfer_side"] not in (None,"in","out"):
+                        record_error()
+                    valid_timestamp_field(row,"deleted_at",True)
+                elif table=="budgets":
+                    valid_text(row["name"],80,True)
+                    if row["period"] not in ("monthly","custom") or row["scope"] not in ("overall","category","wallet"):
+                        record_error()
+                    valid_date(row["start_date"])
+                    valid_date(row["end_date"])
+                    if row["end_date"]<row["start_date"]:
+                        record_error()
+                    valid_integer(row["amount_minor"],1,MAX_MINOR)
+                    valid_currency(row["currency"])
+                    for key in ("category_id","wallet_id"):
+                        if row[key] is not None:
+                            valid_id(row[key])
+                    valid_integer(row["rollover"],0,1)
+                    valid_timestamp_field(row,"archived_at",True)
+            validated[table]=rows
+
+        if not isinstance(payload["created_at"],str):
+            raise FinanceError("Backup creation time is invalid.")
+        valid_time(payload["created_at"])
+        wallets={row["id"]:row for row in validated["wallets"]}
+        categories={row["id"]:row for row in validated["categories"]}
+        transfers={row["id"]:row for row in validated["transfers"]}
+        for category in validated["categories"]:
+            parent_id=category["parent_id"]
+            if parent_id is None:
+                continue
+            parent=categories.get(parent_id)
+            if parent is None or parent_id==category["id"] or parent["parent_id"] is not None:
+                raise FinanceError("Backup contains an invalid category parent reference.")
+            if parent["kind"] not in (category["kind"],"both") and category["kind"]!="both":
+                raise FinanceError(
+                    "Backup contains a category type that is incompatible with its parent. "
+                    "Update the category hierarchy in the source app and create a new backup."
+                )
+
+        transfer_legs={transfer_id:[] for transfer_id in transfers}
+        for transaction in validated["transactions"]:
+            wallet=wallets.get(transaction["wallet_id"])
+            if wallet is None or transaction["currency"]!=wallet["currency"]:
+                raise FinanceError("Backup contains an invalid transaction wallet reference.")
+            category_id=transaction["category_id"]
+            category=categories.get(category_id) if category_id else None
+            if category_id and category is None:
+                raise FinanceError("Backup contains an invalid transaction category reference.")
+            if transaction["type"]=="transfer":
+                transfer_id=transaction["transfer_id"]
+                if (category_id is not None or transfer_id not in transfers or
+                        transaction["transfer_side"] not in ("in","out") or
+                        transaction["source"]!="manual" or transaction["import_batch_id"] is not None or
+                        transaction["deleted_at"] is not None):
+                    raise FinanceError("Backup contains an invalid transfer transaction reference.")
+                transfer_legs[transfer_id].append(transaction)
+            else:
+                if transaction["transfer_id"] is not None or transaction["transfer_side"] is not None:
+                    raise FinanceError("Backup contains an invalid transaction transfer reference.")
+                if category and category["kind"] not in (transaction["type"],"both"):
+                    raise FinanceError("Backup transaction category type is incompatible.")
+
+        for transfer in validated["transfers"]:
+            source=wallets.get(transfer["source_wallet_id"])
+            destination=wallets.get(transfer["destination_wallet_id"])
+            legs=transfer_legs[transfer["id"]]
+            if (source is None or destination is None or source["id"]==destination["id"] or
+                    source["currency"]!=destination["currency"] or transfer["currency"]!=source["currency"]):
+                raise FinanceError("Backup contains an invalid transfer wallet reference.")
+            if len(legs)!=2 or {leg["transfer_side"] for leg in legs}!={"in","out"}:
+                raise FinanceError("Backup transfer does not have exactly two linked transaction records.")
+            for leg in legs:
+                expected_wallet=source["id"] if leg["transfer_side"]=="out" else destination["id"]
+                if (leg["wallet_id"]!=expected_wallet or leg["amount_minor"]!=transfer["amount_minor"] or
+                        leg["currency"]!=transfer["currency"] or leg["transaction_date"]!=transfer["transaction_date"]):
+                    raise FinanceError("Backup transfer records are inconsistent.")
+
+        for budget in validated["budgets"]:
+            category_id,wallet_id=budget["category_id"],budget["wallet_id"]
+            if budget["scope"]=="overall":
+                if category_id is not None or wallet_id is not None:
+                    record_error()
+            elif budget["scope"]=="category":
+                category=categories.get(category_id)
+                if category is None or category["kind"] not in ("expense","both") or wallet_id is not None:
+                    raise FinanceError("Backup contains an invalid budget category reference.")
+            else:
+                wallet=wallets.get(wallet_id)
+                if wallet is None or wallet["currency"]!=budget["currency"] or category_id is not None:
+                    raise FinanceError("Backup contains an invalid budget wallet reference.")
+
         with self._lock:
             counts={}
             conflicts={}
-            for table in required:
-                ids=[str(row.get("id") or "") for row in data[table] if isinstance(row,dict)]
-                if len(ids)!=len(data[table]) or any(not i for i in ids) or len(ids)!=len(set(ids)):
-                    raise FinanceError("Backup has invalid record identifiers.")
+            for table in tables:
+                ids=[row["id"] for row in validated[table]]
                 counts[table]=len(ids)
-                if ids:
-                    placeholders=",".join("?" for _ in ids)
-                    conflicts[table]=self.conn.execute("SELECT COUNT(*) n FROM {} WHERE owner_id=? AND id IN ({})".format(table,placeholders),[LOCAL_OWNER]+ids).fetchone()["n"]
-                else:
-                    conflicts[table]=0
-            wallets={w["id"]:w for w in data["wallets"]}
-            categories={c["id"]:c for c in data["categories"]}
-            current_wallets={r["id"]:r["currency"] for r in self.conn.execute("SELECT id,currency FROM wallets WHERE owner_id=?",(LOCAL_OWNER,)).fetchall()}
-            for wid,w in wallets.items():
-                if wid in current_wallets and current_wallets[wid]!=w.get("currency"):
+                conflicts[table]=0
+                for offset in range(0,len(ids),500):
+                    batch=ids[offset:offset+500]
+                    placeholders=",".join("?" for _ in batch)
+                    conflicts[table]+=self.conn.execute(
+                        "SELECT COUNT(*) n FROM {} WHERE owner_id=? AND id IN ({})".format(table,placeholders),
+                        [LOCAL_OWNER]+batch).fetchone()["n"]
+            current_wallets={r["id"]:r["currency"] for r in self.conn.execute(
+                "SELECT id,currency FROM wallets WHERE owner_id=?",(LOCAL_OWNER,)).fetchall()}
+            for wallet_id,wallet in wallets.items():
+                if wallet_id in current_wallets and current_wallets[wallet_id]!=wallet["currency"]:
                     raise FinanceError("A wallet ID in this backup has a different currency on this device. Resolve this conflict before merging.")
-            for t in data["transactions"]:
-                if t.get("wallet_id") not in wallets or (t.get("category_id") and t.get("category_id") not in categories):
-                    raise FinanceError("Backup contains a broken transaction reference.")
-                if t.get("type") not in ("expense","income","transfer") or int(t.get("amount_minor",0))<=0:
-                    raise FinanceError("Backup contains an invalid transaction.")
         return {"counts":counts,"conflicts":conflicts,"total":sum(counts.values())}
+
+    def _validate_merge_relationships(self, data: Dict[str, Any]) -> None:
+        """Validate references against values that merge will actually retain."""
+        with self._lock:
+            current={table:{row["id"]:dict(row) for row in self.conn.execute(
+                "SELECT * FROM {} WHERE owner_id=?".format(table),(LOCAL_OWNER,)).fetchall()}
+                for table in ("wallets","categories","transfers","transactions","budgets")}
+        effective={table:dict(rows) for table,rows in current.items()}
+        for table,rows in data.items():
+            for row in rows:
+                effective[table].setdefault(row["id"],row)
+        wallets,categories=effective["wallets"],effective["categories"]
+        for incoming in data["categories"]:
+            category=categories[incoming["id"]]
+            parent_id=category["parent_id"]
+            if parent_id is None:
+                continue
+            parent=categories.get(parent_id)
+            if (parent is None or parent_id==category["id"] or parent["parent_id"] is not None or
+                    (parent["kind"] not in (category["kind"],"both") and category["kind"]!="both")):
+                raise FinanceError("Backup category conflicts with an incompatible local category relationship.")
+
+        touched_transfers=set()
+        for incoming in data["transactions"]:
+            if incoming["id"] in current["transactions"]:
+                continue
+            transaction=effective["transactions"][incoming["id"]]
+            wallet=wallets.get(transaction["wallet_id"])
+            if wallet is None or wallet["currency"]!=transaction["currency"]:
+                raise FinanceError("Backup transaction conflicts with the local wallet currency.")
+            category_id=transaction["category_id"]
+            category=categories.get(category_id) if category_id else None
+            if category_id and category is None:
+                raise FinanceError("Backup transaction conflicts with a missing local category.")
+            if category and category["kind"] not in (transaction["type"],"both"):
+                raise FinanceError("Backup transaction conflicts with the local category type.")
+            if transaction["type"]=="transfer":
+                touched_transfers.add(transaction["transfer_id"])
+        for incoming in data["transfers"]:
+            if incoming["id"] not in current["transfers"]:
+                touched_transfers.add(incoming["id"])
+        for transfer_id in touched_transfers:
+            transfer=effective["transfers"].get(transfer_id)
+            if transfer is None:
+                raise FinanceError("Backup contains a missing local transfer reference.")
+            source=wallets.get(transfer["source_wallet_id"])
+            destination=wallets.get(transfer["destination_wallet_id"])
+            legs=[row for row in effective["transactions"].values() if row["transfer_id"]==transfer_id]
+            if (source is None or destination is None or source["id"]==destination["id"] or
+                    source["currency"]!=destination["currency"] or source["currency"]!=transfer["currency"] or
+                    len(legs)!=2 or {row["transfer_side"] for row in legs}!={"in","out"}):
+                raise FinanceError("Backup conflicts with an incomplete local transfer relationship.")
+            for leg in legs:
+                expected=source["id"] if leg["transfer_side"]=="out" else destination["id"]
+                if (leg["wallet_id"]!=expected or leg["currency"]!=transfer["currency"] or
+                        leg["amount_minor"]!=transfer["amount_minor"] or
+                        leg["transaction_date"]!=transfer["transaction_date"]):
+                    raise FinanceError("Backup conflicts with inconsistent local transfer records.")
+
+        for incoming in data["budgets"]:
+            if incoming["id"] in current["budgets"]:
+                continue
+            budget=effective["budgets"][incoming["id"]]
+            category_id,wallet_id=budget["category_id"],budget["wallet_id"]
+            if budget["scope"]=="category":
+                category=categories.get(category_id)
+                if category is None or category["kind"] not in ("expense","both"):
+                    raise FinanceError("Backup budget conflicts with the local category type.")
+            elif budget["scope"]=="wallet":
+                wallet=wallets.get(wallet_id)
+                if wallet is None or wallet["currency"]!=budget["currency"]:
+                    raise FinanceError("Backup budget conflicts with the local wallet currency.")
 
     def restore_payload(self, payload: Dict[str, Any], mode: str) -> Dict[str, Any]:
         preview=self.preview_restore(payload)
         if mode not in ("merge","replace"):
             raise FinanceError("Choose merge or replace.")
         data=payload["data"]
+        if mode=="merge":
+            self._validate_merge_relationships(data)
         order=("wallets","categories","transfers","transactions","budgets")
         inserted={}
         with self._write() as c:
@@ -955,7 +1318,12 @@ class FinanceStore:
                 inserted[table]=0
                 columns=[r[1] for r in c.execute("PRAGMA table_info({})".format(table)).fetchall() if r[1]!="rowid"]
                 allowed=set(columns)
-                for row in data.get(table,[]):
+                rows=data.get(table,[])
+                if table=="categories":
+                    # Backup list order is not a dependency guarantee. The
+                    # schema permits one parent level, so insert roots first.
+                    rows=sorted(rows,key=lambda row:row["parent_id"] is not None)
+                for row in rows:
                     values={k:v for k,v in row.items() if k in allowed}
                     if values.get("owner_id") not in (None,LOCAL_OWNER):
                         raise FinanceError("Backup owner scope is invalid.")
@@ -964,6 +1332,12 @@ class FinanceStore:
                         if mode=="merge":
                             continue
                         raise FinanceError("Backup contains duplicate records.")
+                    if table=="transactions" and values.get("import_batch_id") is not None:
+                        # Import batches are transient review/idempotency records and
+                        # are intentionally omitted from v1 archives. Preserve the
+                        # transaction's source label, but sever this non-FK link so
+                        # restored rows cannot point at a missing or unrelated batch.
+                        values["import_batch_id"]=None
                     names=list(values)
                     c.execute("INSERT INTO {}({}) VALUES({})".format(table,",".join(names),",".join("?" for _ in names)),[values[n] for n in names])
                     inserted[table]+=1

@@ -8,6 +8,8 @@ The app uses Python 3.9's standard-library HTTP server, SQLite, and a browser in
 
 The default database is `instance/wealth_app.sqlite3`. `WEALTH_APP_DATA_DIR` can point to another local folder. The service binds to `127.0.0.1:8000` only. It has no login and should not be exposed to a network.
 
+**Approved release scope:** keep this app local-first. Hosted sync, cloud accounts, authentication, pCloud OAuth, and automatic uploads are deferred and are not requirements for the local release. Manual encrypted backup/restore remains the supported way to transfer or recover data.
+
 ## 2. What Is Implemented
 
 | Feature | Status | What it does and current limits |
@@ -21,15 +23,15 @@ The default database is `instance/wealth_app.sqlite3`. `WEALTH_APP_DATA_DIR` can
 | Categories | Partial | Seeded and custom categories, type, icon, color, one-level parent, and archive fields. Reordering, usage counts, and a clear archived-category restore view are not present. |
 | Budgets | Partial | Create, edit, archive, date range, amount, currency, and overall/category/wallet scope. They use explicit dates; automatic recurrence and rollover are not supported. |
 | Reports | Partial | Date-filtered summary, spending by category and wallet, and monthly income/expense. Report exports, additional filters, and detailed chart accessibility review remain to do. |
-| CSV import | Partial | UTF-8 CSV is staged for row review/editing and explicit commit or discard. Input is bounded to 2 MB/5,000 rows. Broader format and malformed-file testing is still needed. |
-| PDF import | Partial | Local text extraction with `pypdf`, then staged review. Parser recognizes a narrow ISO-date / description / amount pattern; scanned PDFs and OCR are unsupported. |
-| CSV export | Partial | Optional date range and up to 50,000 records. Description and notes are escaped when they begin with formula characters, but wallet/category fields are not; review/fix formula-injection coverage before relying on exports in spreadsheet software. |
+| CSV import | Partial | UTF-8 CSV is staged for row review/editing and explicit commit or discard. Input is bounded to 2 MB/5,000 rows; BOM headers are accepted and malformed quoting rejected. Wider real-world format compatibility is unverified. |
+| PDF import | Partial | Local text extraction with `pypdf`, then staged review of rows matching a narrow ISO-date / description / amount pattern. The 8 MB decoded-file limit is enforced; unrecognized lines are omitted rather than offered for repair. Scanned PDFs and OCR are unsupported. |
+| CSV export | Done (core safety) | Optional date range and up to 50,000 records. All emitted cells are protected against formula-leading content and the synthetic suite checks wallet, category, description, and note fields. Compatibility across spreadsheet programs is not visually tested. |
 | Settings | Partial | Display currency, theme, week-start preference, and privacy/sync/backup status. Preferences are browser-local; the selected currency/week start are not consistently applied throughout the UI. There is no account or session management. |
-| Encrypted backup | Done | Passphrase-derived key using scrypt and AES-256-GCM; passphrase is not saved by the app. A lost passphrase cannot be recovered. |
-| Backup restore | Partial | Decrypt and preview first, then merge or separately confirmed replacement. More malformed archive, rollback, and real restart testing is needed. |
+| Encrypted backup | Done | Passphrase-derived key using scrypt and AES-256-GCM; version 1 now accepts only the app's generated work factors to bound decryption cost. Passphrase is not saved; a lost passphrase cannot be recovered. |
+| Backup restore | Partial | Decrypt and preview first, then merge or separately confirmed replacement. Preview rejects missing required database fields; synthetic tests verify encryption round-trip, tamper/wrong-passphrase rejection, bounded KDF settings, and rollback on failed replacement. Broader malformed archive testing is still needed. |
 | Local persistence | Done | SQLite with integer minor-unit money, foreign keys, WAL, version fields, soft-delete/archive behavior, and restricted file/directory permissions where supported. The database itself is plaintext. |
 | Remote sync / login | Not implemented | This is one local workspace. No authentication, multi-user API, offline outbox, conflict resolution, or device management exists. |
-| pCloud | Partial | An encrypted backup file can be manually uploaded with pCloud's own app. The app has no pCloud OAuth or direct upload integration. |
+| pCloud transfer | Manual process only | The app has no pCloud integration and sends no files to pCloud. A user may transfer encrypted backup files manually with the separate pCloud client; direct OAuth/API integration and automatic upload are deferred. |
 
 No bank connections, automatic bank extraction, statement scraping, or OCR are implemented.
 
@@ -88,29 +90,30 @@ To add a navigation page, add a sidebar link with `data-page="new-page"` and `hr
 6. Open `http://127.0.0.1:8000` in a browser.
 7. Stop the server with **Ctrl+C** in its terminal, or the Stop button if it was started from PyCharm.
 
-The configured environment uses Python 3.9.6. If `Address already in use` appears, another process already owns port 8000; stop that process only if you know it is your app, or arrange a different port in code and keep the documented URL in sync. The app currently hard-codes port 8000 in `serve()` and in the local safety checks. If the page cannot connect, confirm the terminal still shows the server running and use the exact loopback URL above.
+The configured environment uses Python 3.9.6. If `Address already in use` appears, another process already owns port 8000; stop that process only if you know it is your app, or arrange a different port in code and keep the documented URL in sync. `serve()` defaults to port 8000; the Host/Origin guard validates the actual bound loopback port. If the page cannot connect, confirm the terminal still shows the server running and use the exact loopback URL above.
 
 ## 6. Testing and Verification
 
-### Checks rerun for this guide
+### Recorded verification (2026-10-25)
 
-- `.venv/bin/python -m unittest discover -s tests -v`: **13 tests passed**. They cover money precision, wallet balances, income/expense math, atomic transfer behavior and currency restrictions, category archive/parent rules, budget date totals, staged import commit/cancel, soft delete, idempotency, and restore merge.
+These results are from the most recent recorded verification run; they were not rerun during this documentation review.
+
+- `WEALTH_APP_RUN_HTTP_SMOKE=1 .venv/bin/python -m unittest discover -s tests -v`: **29 tests passed**. This includes real HTTP requests to the application handler on an ephemeral loopback port using a disposable synthetic SQLite database, plus a check that the server refuses non-loopback binding.
+- The HTTP test exercised app/static pages, health/bootstrap/reports/settings, wallet/category/budget/transaction/transfer create and update routes, CSV preview/commit/cancel/export, invalid PDF input, encrypted backup create/preview/restore, malformed requests, and Host/Origin rejection. It did not connect to port 8000.
 - `node --check static/app.js` and `node --check static/service-worker.js`: passed.
-- Python compilation for `main.py` and `finance_core.py`: passed.
-- Read-only requests to the already-running local service returned HTTP 200 for `/api/health`, `/`, and `/components.css`. A new server could not be started because port 8000 was already occupied; the existing service was not stopped.
+- Python compilation for `main.py`, `finance_core.py`, and test modules: passed.
+- Chrome 156 on macOS: Settings deep links (`preferences`, `privacy`, `sync`), dialog keyboard navigation and focus containment, Escape close with focus restoration, and visible keyboard focus passed. No page runtime errors occurred.
 
-### Previously recorded smoke checks
-
-`docs/implementation-plan.md` records an earlier isolated smoke run that saved a synthetic wallet and transaction and checked encrypted-backup round-trip plus tamper rejection. Those actions were not repeated during this documentation task. No real financial records were used.
+The browser checks used a separate temporary Chrome profile. Browser requests were restricted to the synthetic local test server; no forms were submitted. No live database, real financial records, or Spendee pages were accessed.
 
 ### Tests still needed
 
-- UI interaction and responsive-layout checks on actual laptop and phone-sized screens, including keyboard and screen-reader use.
+- Responsive layout checks on laptop and phone-sized viewports, screen-reader testing, and contrast review.
 - End-to-end wallet create/edit/archive/restore; transaction create/edit/delete; income/expense dashboard calculations; transfer balance consistency.
 - Category selection and archive behavior; budget scopes, dates, and filters; report date boundaries and currency grouping.
-- CSV imports with quoting, encodings, bad dates/amounts, duplicates, formula cells, and large files; PDF imports with multiple statement layouts, malformed/encrypted/scanned files, and ambiguous rows.
-- CSV export boundary at 50,000 records and formula safety in target spreadsheet software.
-- Backup wrong-passphrase, tampering, malformed/oversized file, merge conflicts, replacement confirmation, and post-restart persistence.
+- CSV imports with unusual delimiters, bad dates/amounts, duplicates, formula cells, and representative exports from other apps; PDF imports with multiple statement layouts, encrypted/scanned files, and ambiguous rows.
+- CSV export boundary at 50,000 records and formula behavior in target spreadsheet programs.
+- Broader backup malformed/oversized file cases, merge conflicts, replacement confirmation, and recovery scenarios.
 - Error paths, browser storage behavior, local database permissions, dependency review, and an independent security review before entering real data.
 
 ## 7. What Is Still Missing
@@ -118,10 +121,10 @@ The configured environment uses Python 3.9.6. If `Address already in use` appear
 | Feature | Status | What's missing |
 |---|---|---|
 | Wallet detail/activity | Partial | Dedicated wallet page, scoped summary and date controls; current Activity action filters the transaction list. |
-| Remote synchronization | Not implemented | Hosted canonical API, offline queue, revisions, conflict UI, retry policy, and device sync. |
-| Authentication/account management | Not implemented | Identity provider, secure sessions, recovery, sign-out, and account lifecycle. |
-| Deployment for multiple devices | Not implemented | Hosting, TLS, domain, owner isolation, operations, backups, and abuse/rate controls. |
-| Integrated pCloud | Partial | OAuth app registration, token lifecycle/storage, encrypted-file upload/download, and status/revocation handling. |
+| Remote synchronization | Not implemented (deferred) | Hosted canonical API, offline queue, revisions, conflict UI, retry policy, and device sync; intentionally outside the approved local release. |
+| Authentication/account management | Not implemented (deferred) | Identity provider, secure sessions, recovery, sign-out, and account lifecycle; intentionally outside the approved local release. |
+| Multi-device deployment | Not implemented (deferred) | Hosting, TLS, domain, owner isolation, operations, backups, and abuse/rate controls; no deployment is approved. |
+| Integrated pCloud | Not implemented (deferred) | OAuth app registration, token lifecycle/storage, encrypted-file upload/download, and status/revocation handling. Manual encrypted file transfer is supported instead. |
 | Live database encryption | Not implemented | The SQLite file is plaintext; OS-level full-disk encryption or an evaluated encrypted database/storage design is needed. |
 | Import compatibility | Partial | More formats, parser fixtures, ambiguous-row handling, and integration tests. PDF support is deliberately narrow. |
 | Accessibility and visual QA | Needs verification | Keyboard/focus behavior, screen-reader descriptions, contrast, and real viewport checks. |
@@ -133,10 +136,10 @@ The configured environment uses Python 3.9.6. If `Address already in use` appear
 
 - **Plaintext live database:** AES-GCM applies to exported backup files only. A person or malware with access to the local database file can read its contents. Before storing real records, evaluate full-disk encryption and an encrypted database approach, backups, key handling, and recovery. File permissions are not encryption.
 - **No multi-device sync or login:** Sync would require an authenticated server, TLS, per-user authorization, offline change queue, conflict resolution, transfer-level atomicity, deletion handling, and device/session management. These choices are not present in the current local-only app.
-- **Manual pCloud workflow:** users upload/download the encrypted archive themselves. Direct support would require an OAuth application, safe server-side token storage, least-privilege access, token refresh/revocation, upload error handling, and a policy to upload only encrypted backups.
+- **Manual pCloud workflow:** the app does not contact pCloud. Users may transfer the encrypted archive themselves with a separate client. Direct support would require an OAuth application, safe token handling, least-privilege access, token refresh/revocation, upload error handling, and a policy to upload only encrypted backups.
 - **Wallet activity is a filter:** activity opens the general transaction list with one wallet selected. There is no wallet detail analytics screen.
 - **Import reliability:** CSV/PDF parsing is not universal. PDF parsing expects selectable text and a narrow ISO-date/description/amount row; it is not OCR. Imports require user review, but varied/malformed files and duplicates still need systematic tests.
-- **CSV formula safety:** the export helper currently prefixes formula-leading description and note cells, but wallet names and category names are also written to the CSV without that escaping. Treat this as a confirmed export-safety gap and cover every user-controlled text column before spreadsheet use.
+- **CSV formula safety:** all exported cells are now protected against formula evaluation, with synthetic tests covering each user-controlled text column. Confirm behavior in the spreadsheet programs the owner plans to use.
 - **Preference coverage:** theme, currency, and week-start preferences are stored in browser local storage, but currency/week-start behavior is not consistently wired to all forms/views; preferences are also not part of the encrypted backup payload.
 - **Single-user security boundary:** there is no authentication. Loopback binding, Host/Origin checks, payload limits, security headers, and suppressed request logging are useful safeguards, but do not make this a hardened hosted product.
 - **Offline behavior:** the service worker caches the app shell only. It does not queue or save finance changes offline.
@@ -149,9 +152,9 @@ Keep using synthetic data until storage and security choices are reviewed. Do no
 
 ## 9. Recommended Next Steps
 
-1. **Stability and security:** fix and test CSV formula escaping for every user-controlled column; add repeatable API/end-to-end tests; test restart persistence, restore failure/recovery, import limits and malformed files; review plaintext storage, permissions, logs, and dependencies.
+1. **Stability and security:** add repeatable API/end-to-end tests; test restart persistence and additional restore recovery paths; review plaintext storage, permissions, logs, and dependencies.
 2. **UI polish:** test phone/laptop layouts and keyboard access; add a real wallet detail/activity view; make archived categories/budgets easier to review; reformat `app.css` for maintainability.
-3. **Product expansion:** decide sync hosting, identity, owner model, offline queue, conflict policy, encryption boundary, and operational costs before implementation. Then evaluate pCloud OAuth against the chosen server and key-storage design.
+3. **Deferred future work:** hosted sync, accounts, multi-device deployment, and pCloud OAuth are not part of the approved local release. Revisit them only after a separate product/security decision and explicit approval.
 
 ## 10. Project File Map
 
@@ -167,7 +170,13 @@ Keep using synthetic data until storage and security choices are reviewed. Do no
 | `static/manifest.webmanifest` | Web app metadata. |
 | `requirements.txt` | `cryptography` and `pypdf` dependencies. |
 | `tests/test_finance.py` | Synthetic finance-domain unit tests. |
+| `tests/test_import_parsing.py` | Synthetic CSV/PDF parser validation and boundary tests. |
+| `tests/test_http_smoke.py` | Opt-in HTTP handler smoke tests using a disposable synthetic database and loopback port. |
 | `README.md` | Short setup, privacy, and limitation summary. |
 | `docs/architecture.md` | Current technical design and sync boundary. |
 | `docs/implementation-plan.md` | Phases, decisions, and recorded verification. |
 | `wealth_app_build_spec.md` | Original product requirements; not proof that each item is implemented. |
+
+### Repository history warning
+
+The Chrome profile under `rea_work/chrome-profile/` was present in the initial Git commit. Its 1,058 tracked entries have been removed from the current index and are ignored locally; local files were preserved. Filename inventory identified browser stores such as Cookies, Login Data, and Web Data. No profile database contents or matched values were opened or disclosed. A limited pattern scan returned one unclassified match in a Safe Browsing data file; no dedicated secret scanner was available. The profile remains in Git history. Do not commit or publish until history and any remote copies are reviewed and cleaned.

@@ -11,9 +11,9 @@
 
 ## Data flow
 
-Browser UI → same-origin JSON API → domain validation/calculations → SQLite. CSV/PDF imports are parsed locally into a staged review batch; only explicitly accepted rows commit. Statement bytes are never written to a temporary file. Errors and request logs omit payloads and financial values.
+Browser UI → same-origin JSON API → domain validation/calculations → SQLite. CSV rows and recognizable PDF candidates are parsed locally into a staged review batch; only explicitly accepted rows commit. The PDF parser ignores unrecognized lines, so they are not available for manual repair in the review step. Statement bytes are held in memory rather than written to temporary files. Errors and request logs omit payloads and financial values.
 
-Encrypted backup export serializes supported records, derives a key with scrypt, and encrypts with AES-GCM through PyCA cryptography. Restore validates/decrypts and previews counts/conflicts before a separately confirmed atomic merge or replacement. Manual encrypted file transfer is the initial pCloud-compatible fallback; raw data is never uploaded.
+Encrypted backup export serializes supported records, derives a key with scrypt, and encrypts with AES-GCM through PyCA cryptography. Restore validates/decrypts and previews counts/conflicts before a separately confirmed atomic merge or replacement. The app does not integrate with or contact pCloud. A user can manually move an encrypted backup with the pCloud client; the app itself uploads no data.
 
 ## Sync and deployment decision
 
@@ -21,13 +21,18 @@ Cross-device sync needs a hosted canonical API, identity provider, owner scoping
 
 ## PDF parsing
 
-Use maintained `pypdf` for local text extraction. Parsing is best-effort because statement formats vary. A conservative candidate parser stages only recognizable rows; all rows remain editable/reviewable, and ambiguous rows are excluded until the user resolves them. No OCR or external processing is used.
+Use maintained `pypdf` for local text extraction. Parsing is best-effort because statement formats vary. A conservative candidate parser stages only recognizable rows for review. Unrecognized PDF lines are ignored and cannot be corrected in the current UI. No OCR or external processing is used.
 
 ## Privacy and safety
 
 - No telemetry, analytics, external fonts, or third-party runtime requests.
 - Bind only to loopback; reject cross-origin state-changing requests; cap JSON/upload sizes; do not log request content.
 - Never delete wallet/category history; archive instead. Transaction deletion is a soft delete. Transfers use a parent record with two ledger legs in a single SQLite transaction.
-- Imports and restores use preview then explicit commit. Formula-like CSV cells are escaped on export.
+- Imports and restores use preview then explicit commit. CSV export prefixes formula-leading content in every output column, including wallet and category values. Spreadsheet programs vary, so this reduces risk but is not a universal compatibility guarantee.
+- State-changing requests validate Host and Origin against the server's actual loopback address and port; the server refuses non-loopback binds.
 - Local-only mode and encrypted backups are not a substitute for a hardened hosted deployment; do not expose this development server to a network.
-- The pCloud fallback is manual upload/download of encrypted backup files. OAuth/API upload is deferred pending app registration and server-side token storage.
+- There is no pCloud integration. Users may manually upload/download encrypted backups through a separate pCloud client; the app has no OAuth/API upload path and sends no files to pCloud.
+
+## Repository hygiene warning
+
+The Chrome profile under `rea_work/chrome-profile/` was included in the initial Git commit. Its 1,058 tracked entries are removed from the current index and the directory is ignored locally; local profile files are preserved. Filename inventory included browser stores such as Cookies, Login Data, and Web Data. No profile database contents or matched values were opened or disclosed. A limited pattern scan returned one match in a Safe Browsing data file that has not been classified; no dedicated secret scanner was available. The profile remains in local Git history. Do not publish until the history and any remote copies have been reviewed and cleaned.
